@@ -13,5 +13,6 @@
     "line_ending": "\\r\\n",
     "font_size": 11,
     "reset_on_connect": false,
+    "language": "tr",
     "command_history": []
 }

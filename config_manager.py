@@ -20,6 +20,7 @@ DEFAULT_CONFIG = {
     "line_ending": "\\r\\n",
     "font_size": 11,
     "reset_on_connect": False,
+    "language": "tr",
     "command_history": []
 }
 

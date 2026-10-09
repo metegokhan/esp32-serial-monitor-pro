@@ -1,6 +1,7 @@
 import sys
 import unittest
-from PyQt6.QtWidgets import QApplication
+from unittest.mock import patch
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from ui_main_window import MainWindow
 
 app = QApplication.instance()
@@ -39,7 +40,8 @@ class TestMultiPanel(unittest.TestCase):
     def setUp(self):
         self.win = MainWindow()
 
-    def test_multi_panel_creation_and_limit(self):
+    @patch.object(QMessageBox, 'information')
+    def test_multi_panel_creation_and_limit(self, mock_info):
         # Varsayılan 1 panel
         self.assertEqual(len(self.win.panels), 1)
 

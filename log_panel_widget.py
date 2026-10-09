@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from log_viewer import Esp32LogViewer
 from archiver import SessionArchiver
+from i18n import t
 
 
 class LogPanelWidget(QWidget):
@@ -23,6 +24,8 @@ class LogPanelWidget(QWidget):
         self.panel_id = panel_id
         self.is_active = is_active
         self._title = title
+        self._last_stats = (0, 0)
+        self._range_cache = None
 
         self._init_ui()
         self._init_connections()
@@ -67,31 +70,31 @@ class LogPanelWidget(QWidget):
         # Butonlar
         if self.is_active:
             # Aktif Log Butonları
-            self.btn_ref = QPushButton("📌 Referans Yap")
-            self.btn_ref.setToolTip("Bu logu sola referans paneline aktarır ve sağda yeni canlı oturum açar")
+            self.btn_ref = QPushButton(t("btn_make_ref"))
+            self.btn_ref.setToolTip(t("btn_make_ref_tip"))
             self.btn_ref.setStyleSheet("background-color: #3B82F6; color: white;")
             self.btn_ref.clicked.connect(lambda: self.make_reference_requested.emit(self))
             header_layout.addWidget(self.btn_ref)
         else:
             # Referans Panel Butonları
-            self.btn_load = QPushButton("📂 Log Yükle")
-            self.btn_load.setToolTip("Eski arşivden veya dosyadan log yükle")
+            self.btn_load = QPushButton(t("btn_load_log"))
+            self.btn_load.setToolTip(t("btn_load_log_tip"))
             self.btn_load.clicked.connect(self.load_log_file)
             header_layout.addWidget(self.btn_load)
 
         self.btn_export = QPushButton("💾")
-        self.btn_export.setToolTip("Bu paneldeki logu kaydet")
+        self.btn_export.setToolTip(t("btn_export_tip"))
         self.btn_export.clicked.connect(self.export_log)
         header_layout.addWidget(self.btn_export)
 
         self.btn_clear = QPushButton("🧹")
-        self.btn_clear.setToolTip("Bu paneli temizle")
+        self.btn_clear.setToolTip(t("btn_clear_tip"))
         self.btn_clear.clicked.connect(self.clear_panel)
         header_layout.addWidget(self.btn_clear)
 
         if not self.is_active:
             self.btn_close = QPushButton("✕")
-            self.btn_close.setToolTip("Bu referans panelini kapat")
+            self.btn_close.setToolTip(t("btn_close_panel_tip"))
             self.btn_close.setStyleSheet("background-color: #EF4444; color: white; padding: 2px 6px;")
             self.btn_close.clicked.connect(lambda: self.close_requested.emit(self))
             header_layout.addWidget(self.btn_close)
@@ -136,41 +139,79 @@ class LogPanelWidget(QWidget):
 
         layout.addStretch()
 
-        btn_copy = QPushButton("📋 Kopyala")
-        btn_copy.setStyleSheet("background-color: #0284C7; color: white;")
-        btn_copy.clicked.connect(self.viewer.copySelectedRange)
-        layout.addWidget(btn_copy)
+        self.btn_range_copy = QPushButton(t("btn_range_copy"))
+        self.btn_range_copy.setStyleSheet("background-color: #0284C7; color: white;")
+        self.btn_range_copy.clicked.connect(self.viewer.copySelectedRange)
+        layout.addWidget(self.btn_range_copy)
 
-        btn_save = QPushButton("💾 Kaydet")
-        btn_save.clicked.connect(self.export_selected_range)
-        layout.addWidget(btn_save)
+        self.btn_range_save = QPushButton(t("btn_range_save"))
+        self.btn_range_save.clicked.connect(self.export_selected_range)
+        layout.addWidget(self.btn_range_save)
 
-        btn_clear = QPushButton("✕")
-        btn_clear.setToolTip("Seçimi Kaldır")
-        btn_clear.clicked.connect(self.viewer.clearPoints)
-        layout.addWidget(btn_clear)
+        self.btn_range_clear = QPushButton("✕")
+        self.btn_range_clear.setToolTip(t("btn_range_clear_tip"))
+        self.btn_range_clear.clicked.connect(self.viewer.clearPoints)
+        layout.addWidget(self.btn_range_clear)
 
         return banner
 
     def _init_connections(self):
         self.viewer.range_selected.connect(self.on_range_selected)
-        self.viewer.range_cleared.connect(self.range_banner.hide)
+        self.viewer.range_cleared.connect(self._on_range_cleared)
         self.viewer.word_clicked.connect(lambda w, o, l: self.word_clicked_global.emit(self, w))
         self.viewer.status_message.connect(self.status_message.emit)
         self.viewer.filter_stats_updated.connect(self.on_filter_stats_updated)
 
+    def _on_range_cleared(self):
+        self._range_cache = None
+        self.range_banner.hide()
+
     def on_range_selected(self, start: int, end: int, text: str):
+        self._range_cache = (start, end)
         total = end - start + 1
-        self.lbl_range_info.setText(f"📍 Nokta A ({start}) ➔ B ({end}) [{total} satır]")
+        self.lbl_range_info.setText(t("range_banner_info", start=start, end=end, total=total))
         self.range_banner.show()
 
     def on_filter_stats_updated(self, matched: int, total: int):
-        if matched == total:
-            self.lbl_badge.setText(f"[ {total} Satır ]")
+        self._last_stats = (matched, total)
+        if matched == total or total == 0:
+            self.lbl_badge.setText(t("badge_lines", count=total))
             self.lbl_badge.setStyleSheet("color: #F9E2AF; font-size: 11px;")
         else:
-            self.lbl_badge.setText(f"[ Süzüldü: {matched} / {total} Satır ]")
+            self.lbl_badge.setText(t("badge_filtered", matched=matched, total=total))
             self.lbl_badge.setStyleSheet("color: #A6E3A1; font-weight: bold; font-size: 11px;")
+
+    def retranslate_ui(self):
+        if self.is_active:
+            if hasattr(self, 'btn_ref'):
+                self.btn_ref.setText(t("btn_make_ref"))
+                self.btn_ref.setToolTip(t("btn_make_ref_tip"))
+        else:
+            if hasattr(self, 'btn_load'):
+                self.btn_load.setText(t("btn_load_log"))
+                self.btn_load.setToolTip(t("btn_load_log_tip"))
+            if hasattr(self, 'btn_close'):
+                self.btn_close.setToolTip(t("btn_close_panel_tip"))
+
+        if hasattr(self, 'btn_export'):
+            self.btn_export.setToolTip(t("btn_export_tip"))
+        if hasattr(self, 'btn_clear'):
+            self.btn_clear.setToolTip(t("btn_clear_tip"))
+
+        if hasattr(self, 'btn_range_copy'):
+            self.btn_range_copy.setText(t("btn_range_copy"))
+        if hasattr(self, 'btn_range_save'):
+            self.btn_range_save.setText(t("btn_range_save"))
+        if hasattr(self, 'btn_range_clear'):
+            self.btn_range_clear.setToolTip(t("btn_range_clear_tip"))
+
+        matched, total = self._last_stats
+        self.on_filter_stats_updated(matched, total)
+
+        if self._range_cache:
+            start, end = self._range_cache
+            total_r = end - start + 1
+            self.lbl_range_info.setText(t("range_banner_info", start=start, end=end, total=total_r))
 
     def set_title(self, title: str):
         self._title = title

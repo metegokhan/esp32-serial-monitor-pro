@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QStatusBar, QFileDialog, QMessageBox, QFrame,
     QSplitter, QApplication
 )
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QActionGroup
 from PyQt6.QtCore import Qt, pyqtSlot
 
 from config_manager import ConfigManager
@@ -18,16 +18,18 @@ from archiver import SessionArchiver
 from trigger_manager import TriggerManager
 from log_panel_widget import LogPanelWidget
 from archive_dialog import ArchiveManagerDialog
+from i18n import t, i18n
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ESP32 Serial Capture & Monitor Pro - Çoklu Panel & Eşzamanlı Analiz")
-        self.resize(1300, 800)
-
-        # Temel Modüller
         self.config = ConfigManager()
+        saved_lang = self.config.get("language", "tr")
+        i18n.set_language(saved_lang)
+
+        self.setWindowTitle(t("app_title"))
+        self.resize(1300, 800)
         archive_dir = self.config.get("archive_dir")
         self.archiver = SessionArchiver(archive_dir)
         self.trigger_mgr = TriggerManager(archive_dir)
@@ -161,79 +163,100 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
         menu.setStyleSheet("background-color: #1E1E2E; color: #CDD6F4;")
 
-        file_menu = menu.addMenu("📁 Dosya")
-        act_add_ref = QAction("➕ Yeni Referans Paneli Aç", self)
-        act_add_ref.setShortcut(QKeySequence("Ctrl+N"))
-        act_add_ref.triggered.connect(self.add_reference_panel)
-        file_menu.addAction(act_add_ref)
+        # Dosya Menüsü
+        self.menu_file = menu.addMenu(t("menu_file"))
+        self.act_add_ref = QAction(t("act_new_ref"), self)
+        self.act_add_ref.setShortcut(QKeySequence("Ctrl+N"))
+        self.act_add_ref.triggered.connect(self.add_reference_panel)
+        self.menu_file.addAction(self.act_add_ref)
 
-        act_make_ref = QAction("📌 Aktif Logu Referans Yap", self)
-        act_make_ref.setShortcut(QKeySequence("Ctrl+R"))
-        act_make_ref.triggered.connect(lambda: self.on_make_reference_requested(self.active_panel))
-        file_menu.addAction(act_make_ref)
+        self.act_make_ref = QAction(t("act_make_ref"), self)
+        self.act_make_ref.setShortcut(QKeySequence("Ctrl+R"))
+        self.act_make_ref.triggered.connect(lambda: self.on_make_reference_requested(self.active_panel))
+        self.menu_file.addAction(self.act_make_ref)
 
-        file_menu.addSeparator()
+        self.menu_file.addSeparator()
 
-        act_open_archives = QAction("📦 Oturum Arşivlerini Yönet...", self)
-        act_open_archives.setShortcut(QKeySequence("Ctrl+H"))
-        act_open_archives.triggered.connect(self.open_archive_manager)
-        file_menu.addAction(act_open_archives)
+        self.act_open_archives = QAction(t("act_archives"), self)
+        self.act_open_archives.setShortcut(QKeySequence("Ctrl+H"))
+        self.act_open_archives.triggered.connect(self.open_archive_manager)
+        self.menu_file.addAction(self.act_open_archives)
 
-        file_menu.addSeparator()
-        act_exit = QAction("Çıkış", self)
-        act_exit.setShortcut(QKeySequence("Ctrl+Q"))
-        act_exit.triggered.connect(self.close)
-        file_menu.addAction(act_exit)
+        self.menu_file.addSeparator()
+        self.act_exit = QAction(t("act_exit"), self)
+        self.act_exit.setShortcut(QKeySequence("Ctrl+Q"))
+        self.act_exit.triggered.connect(self.close)
+        self.menu_file.addAction(self.act_exit)
 
         # Görünüm Menüsü
-        view_menu = menu.addMenu("👁️ Görünüm")
-        act_clear_all = QAction("🧹 Tüm Panelleri Temizle", self)
-        act_clear_all.setShortcut(QKeySequence("Ctrl+Shift+L"))
-        act_clear_all.triggered.connect(self.clear_all_panels)
-        view_menu.addAction(act_clear_all)
+        self.menu_view = menu.addMenu(t("menu_view"))
+        self.act_clear_all = QAction(t("act_clear_all"), self)
+        self.act_clear_all.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        self.act_clear_all.triggered.connect(self.clear_all_panels)
+        self.menu_view.addAction(self.act_clear_all)
 
         # ESP Araçları Menüsü
-        esp_menu = menu.addMenu("⚡ ESP32 Araçları")
-        act_reset = QAction("🔄 ESP32 Donanım Reset (EN Pin)", self)
-        act_reset.setShortcut(QKeySequence("F5"))
-        act_reset.triggered.connect(self.reset_esp32)
-        esp_menu.addAction(act_reset)
+        self.menu_esp = menu.addMenu(t("menu_esp"))
+        self.act_reset = QAction(t("act_esp_reset"), self)
+        self.act_reset.setShortcut(QKeySequence("F5"))
+        self.act_reset.triggered.connect(self.reset_esp32)
+        self.menu_esp.addAction(self.act_reset)
 
-        act_boot = QAction("🚀 Bootloader Moduna Al (IO0+EN)", self)
-        act_boot.setShortcut(QKeySequence("F6"))
-        act_boot.triggered.connect(self.enter_bootloader)
-        esp_menu.addAction(act_boot)
+        self.act_boot = QAction(t("act_esp_boot"), self)
+        self.act_boot.setShortcut(QKeySequence("F6"))
+        self.act_boot.triggered.connect(self.enter_bootloader)
+        self.menu_esp.addAction(self.act_boot)
 
-        esp_menu.addSeparator()
-        self.act_reset_on_conn = QAction("🔌 Bağlanırken Cihazı Resetle (DTR/RTS)", self, checkable=True)
-        self.act_reset_on_conn.setToolTip("Açıkken porta bağlanırken ESP32'yi resetler. Kapalıyken (Arduino gibi) cihaz kesintisiz çalışır.")
+        self.menu_esp.addSeparator()
+        self.act_reset_on_conn = QAction(t("act_reset_on_connect"), self, checkable=True)
+        self.act_reset_on_conn.setToolTip(t("act_reset_on_connect_tip"))
         self.act_reset_on_conn.toggled.connect(self._on_reset_on_connect_toggled)
-        esp_menu.addAction(self.act_reset_on_conn)
+        self.menu_esp.addAction(self.act_reset_on_conn)
+
+        # Dil Menüsü (Language)
+        self.menu_lang = menu.addMenu(t("menu_lang"))
+        self.lang_group = QActionGroup(self)
+        self.lang_group.setExclusive(True)
+
+        self.act_lang_tr = QAction(t("lang_tr"), self, checkable=True)
+        self.act_lang_tr.setChecked(i18n.get_language() == "tr")
+        self.act_lang_tr.triggered.connect(lambda: self.change_language("tr"))
+        self.lang_group.addAction(self.act_lang_tr)
+        self.menu_lang.addAction(self.act_lang_tr)
+
+        self.act_lang_en = QAction(t("lang_en"), self, checkable=True)
+        self.act_lang_en.setChecked(i18n.get_language() == "en")
+        self.act_lang_en.triggered.connect(lambda: self.change_language("en"))
+        self.lang_group.addAction(self.act_lang_en)
+        self.menu_lang.addAction(self.act_lang_en)
 
     def _create_top_control_panel(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.setSpacing(6)
 
-        layout.addWidget(QLabel("Filtre:"))
+        self.lbl_filter = QLabel(t("lbl_filter"))
+        layout.addWidget(self.lbl_filter)
         self.combo_filter = QComboBox()
-        self.combo_filter.addItem("⚡ ESP Cihazları", "esp")
-        self.combo_filter.addItem("🔌 Arduino Cihazları", "arduino")
-        self.combo_filter.addItem("🖲️ Tüm USB Portlar", "usb")
-        self.combo_filter.addItem("🌐 Tüm Portlar", "all")
+        self.combo_filter.addItem(t("filter_esp"), "esp")
+        self.combo_filter.addItem(t("filter_arduino"), "arduino")
+        self.combo_filter.addItem(t("filter_usb"), "usb")
+        self.combo_filter.addItem(t("filter_all"), "all")
         self.combo_filter.currentIndexChanged.connect(self.refresh_ports)
         layout.addWidget(self.combo_filter)
 
-        layout.addWidget(QLabel("Port:"))
+        self.lbl_port = QLabel(t("lbl_port"))
+        layout.addWidget(self.lbl_port)
         self.combo_port = QComboBox()
         self.combo_port.setMinimumWidth(240)
         layout.addWidget(self.combo_port)
 
-        btn_refresh = QPushButton("🔄")
-        btn_refresh.setToolTip("Portları Yenile")
-        btn_refresh.clicked.connect(self.refresh_ports)
-        layout.addWidget(btn_refresh)
+        self.btn_refresh = QPushButton("🔄")
+        self.btn_refresh.setToolTip(t("btn_refresh_tip"))
+        self.btn_refresh.clicked.connect(self.refresh_ports)
+        layout.addWidget(self.btn_refresh)
 
-        layout.addWidget(QLabel("Baud:"))
+        self.lbl_baud = QLabel(t("lbl_baud"))
+        layout.addWidget(self.lbl_baud)
         self.combo_baud = QComboBox()
         self.combo_baud.setEditable(True)
         bauds = ["115200", "921600", "748800", "460800", "230400", "57600", "19200", "9600"]
@@ -241,51 +264,51 @@ class MainWindow(QMainWindow):
         self.combo_baud.setCurrentText("115200")
         layout.addWidget(self.combo_baud)
 
-        self.btn_connect = QPushButton("⚡ Bağlan")
+        # Bağlan Butonu
+        self.btn_connect = QPushButton(t("btn_connect"))
         self.btn_connect.setObjectName("btnConnect")
         self.btn_connect.clicked.connect(self.toggle_connection)
         layout.addWidget(self.btn_connect)
 
-        self.chk_auto_reconnect = QCheckBox("Oto-Bağlan")
-        self.chk_auto_reconnect.setChecked(True)
-        layout.addWidget(self.chk_auto_reconnect)
-
-        self.chk_reset_on_connect = QCheckBox("Bağlantıda Resetle")
-        self.chk_reset_on_connect.setToolTip(
-            "Bağlanırken Cihazı Resetle (DTR/RTS):\n"
-            "• İşaretli: Port açıldığında donanımsal reset atılır (boot loglarını baştan yakalamak için).\n"
-            "• İşaretsiz (Varsayılan): Tıpkı Arduino Serial Monitor gibi cihaz kesintisiz çalışmaya devam eder."
-        )
+        # Kullanıcı Talebi: Bağlantıda Resetle onayı DOĞRUDAN Bağlan butonunun yanında tik şeklinde
+        self.chk_reset_on_connect = QCheckBox(t("chk_reset_on_connect"))
+        self.chk_reset_on_connect.setToolTip(t("chk_reset_on_connect_tip"))
         self.chk_reset_on_connect.setChecked(False)
         self.chk_reset_on_connect.toggled.connect(self._on_reset_on_connect_toggled)
         layout.addWidget(self.chk_reset_on_connect)
 
+        # Oto-Bağlan
+        self.chk_auto_reconnect = QCheckBox(t("chk_auto_reconnect"))
+        self.chk_auto_reconnect.setToolTip(t("chk_auto_reconnect_tip"))
+        self.chk_auto_reconnect.setChecked(True)
+        layout.addWidget(self.chk_auto_reconnect)
+
         layout.addSpacing(6)
 
-        self.btn_reset_esp = QPushButton("🔄 Reset (EN)")
-        self.btn_reset_esp.setToolTip("ESP32 Hardware Reset (F5)")
+        self.btn_reset_esp = QPushButton(t("btn_reset_esp"))
+        self.btn_reset_esp.setToolTip(t("btn_reset_esp_tip"))
         self.btn_reset_esp.clicked.connect(self.reset_esp32)
         layout.addWidget(self.btn_reset_esp)
 
-        self.btn_boot_esp = QPushButton("🚀 Boot (IO0)")
-        self.btn_boot_esp.setToolTip("ESP32 Bootloader Modu (F6)")
+        self.btn_boot_esp = QPushButton(t("btn_boot_esp"))
+        self.btn_boot_esp.setToolTip(t("btn_boot_esp_tip"))
         self.btn_boot_esp.clicked.connect(self.enter_bootloader)
         layout.addWidget(self.btn_boot_esp)
 
         layout.addStretch()
 
         # Panel Ekleme Düğmesi
-        self.btn_add_panel = QPushButton("➕ Referans Paneli Ekle")
+        self.btn_add_panel = QPushButton(t("btn_add_panel"))
         self.btn_add_panel.setStyleSheet("background-color: #0284C7; color: white;")
-        self.btn_add_panel.setToolTip("Yan yana karşılaştırma için 3 adede kadar referans paneli ekleyin")
+        self.btn_add_panel.setToolTip(t("btn_add_panel_tip"))
         self.btn_add_panel.clicked.connect(self.add_reference_panel)
         layout.addWidget(self.btn_add_panel)
 
-        self.chk_timestamp = QCheckBox("⏰ Zaman Damgası")
+        self.chk_timestamp = QCheckBox(t("chk_timestamp"))
         self.chk_timestamp.toggled.connect(self._on_timestamp_toggled)
         layout.addWidget(self.chk_timestamp)
 
-        self.chk_autoscroll = QCheckBox("⬇️ Oto-Kaydır")
+        self.chk_autoscroll = QCheckBox(t("chk_autoscroll"))
         self.chk_autoscroll.setChecked(True)
         layout.addWidget(self.chk_autoscroll)
 
@@ -296,48 +319,51 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
 
         # Eşzamanlı Filtreleme ve Arama
-        layout.addWidget(QLabel("🔍 Canlı Filtre / Ara:"))
+        self.lbl_search = QLabel(t("lbl_search"))
+        layout.addWidget(self.lbl_search)
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Kelime veya kalıp yazın (Tüm panellerde anlık süzme)...")
+        self.search_input.setPlaceholderText(t("search_placeholder"))
         self.search_input.textChanged.connect(self.on_filter_changed)
         layout.addWidget(self.search_input, 2)
 
         # YALNIZCA EŞLEŞEN SATIRLARI GÖSTER (Eşzamanlı Süzme)
-        self.chk_only_matching = QCheckBox("🎯 Sadece Eşleşen Satırları Göster (Eşzamanlı Süz)")
+        self.chk_only_matching = QCheckBox(t("chk_filter_simultaneous"))
         self.chk_only_matching.setStyleSheet("font-weight: bold; color: #A6E3A1;")
-        self.chk_only_matching.setToolTip("Aktif edildiğinde açık olan TÜM panellerde sadece aranan kelimeyi içeren satırlar gösterilir!")
+        self.chk_only_matching.setToolTip(t("chk_filter_simultaneous_tip"))
         self.chk_only_matching.toggled.connect(self.on_filter_changed)
         layout.addWidget(self.chk_only_matching)
 
-        self.chk_search_regex = QCheckBox("Regex")
+        self.chk_search_regex = QCheckBox(t("chk_regex"))
+        self.chk_search_regex.setToolTip(t("chk_regex_tip"))
         self.chk_search_regex.toggled.connect(self.on_filter_changed)
         layout.addWidget(self.chk_search_regex)
 
-        self.chk_search_case = QCheckBox("Aa")
-        self.chk_search_case.setToolTip("Büyük/Küçük Harfe Duyarlı")
+        self.chk_search_case = QCheckBox(t("chk_case"))
+        self.chk_search_case.setToolTip(t("chk_case_tip"))
         self.chk_search_case.toggled.connect(self.on_filter_changed)
         layout.addWidget(self.chk_search_case)
 
-        btn_copy_all = QPushButton("📋 Tüm Eşleşenleri Kopyala")
-        btn_copy_all.setToolTip("Açık olan panellerdeki tüm eşleşen satırları birleştirip panoya kopyalar")
-        btn_copy_all.clicked.connect(self.copy_all_matching_lines)
-        layout.addWidget(btn_copy_all)
+        self.btn_copy_all = QPushButton(t("btn_copy_matches"))
+        self.btn_copy_all.setToolTip(t("btn_copy_matches_tip"))
+        self.btn_copy_all.clicked.connect(self.copy_all_matching_lines)
+        layout.addWidget(self.btn_copy_all)
 
         layout.addSpacing(10)
 
         # Tetikleyici Alanı
-        layout.addWidget(QLabel("🎯 Tetikleyici:"))
+        self.lbl_trigger = QLabel(t("lbl_trigger"))
+        layout.addWidget(self.lbl_trigger)
         self.trigger_input = QLineEdit()
-        self.trigger_input.setPlaceholderText("Örn: 'rst:', 'Guru', 'BOOT'...")
+        self.trigger_input.setPlaceholderText(t("trigger_placeholder"))
         self.trigger_input.editingFinished.connect(self.update_trigger_settings)
         layout.addWidget(self.trigger_input, 1)
 
-        self.chk_trigger_record = QCheckBox("Oto-Kayıt")
-        self.chk_trigger_record.setToolTip("Tetikleyici yakalandığında ayrı log dosyasına kayıt başlatır")
+        self.chk_trigger_record = QCheckBox(t("chk_trigger_record"))
+        self.chk_trigger_record.setToolTip(t("chk_trigger_record_tip"))
         self.chk_trigger_record.toggled.connect(self.update_trigger_settings)
         layout.addWidget(self.chk_trigger_record)
 
-        self.chk_trigger_active = QCheckBox("Aktif")
+        self.chk_trigger_active = QCheckBox(t("chk_trigger_active"))
         self.chk_trigger_active.toggled.connect(self.update_trigger_settings)
         layout.addWidget(self.chk_trigger_active)
 
@@ -347,9 +373,10 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
         layout.setSpacing(6)
 
-        layout.addWidget(QLabel("Komut:"))
+        self.lbl_cmd = QLabel("Komut:" if i18n.get_language() == "tr" else "Command:")
+        layout.addWidget(self.lbl_cmd)
         self.cmd_input = QLineEdit()
-        self.cmd_input.setPlaceholderText("ESP32'ye gönderilecek komut (Yukarı/Aşağı ok ile geçmiş)...")
+        self.cmd_input.setPlaceholderText(t("cmd_placeholder"))
         self.cmd_input.returnPressed.connect(self.send_command)
         self.cmd_input.installEventFilter(self)
         layout.addWidget(self.cmd_input, 1)
@@ -361,9 +388,9 @@ class MainWindow(QMainWindow):
         self.combo_eol.addItem("Yok (None)", "")
         layout.addWidget(self.combo_eol)
 
-        btn_send = QPushButton("📤 Gönder")
-        btn_send.clicked.connect(self.send_command)
-        layout.addWidget(btn_send)
+        self.btn_send = QPushButton(t("btn_send"))
+        self.btn_send.clicked.connect(self.send_command)
+        layout.addWidget(self.btn_send)
 
         for cmd in ["help", "status", "version", "reboot"]:
             btn = QPushButton(cmd)
@@ -377,11 +404,11 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
 
         self.lbl_status_panels = QLabel("🖥️ Panel: 1 / 3")
-        self.lbl_status_conn = QLabel("⚪ Bağlı Değil")
+        self.lbl_status_conn = QLabel(t("status_disconnected"))
         self.lbl_status_conn.setStyleSheet("padding: 0 10px; font-weight: bold;")
         self.lbl_status_rx = QLabel("Rx: 0 B | Tx: 0 B")
         self.lbl_status_lines = QLabel("Satır: 0")
-        self.lbl_status_archive = QLabel("📁 Arşiv: Kapalı")
+        self.lbl_status_archive = QLabel(t("status_no_archive"))
         self.lbl_status_trigger = QLabel("🎯 Tetikleme: 0")
 
         self.status.addPermanentWidget(self.lbl_status_panels)
@@ -596,6 +623,7 @@ class MainWindow(QMainWindow):
         self.chk_trigger_record.setChecked(self.config.get("trigger_record_enabled", False))
         self.chk_trigger_active.setChecked(bool(self.config.get("trigger_word", "")))
         self.update_trigger_settings()
+        self.retranslate_ui()
 
     def _on_reset_on_connect_toggled(self, checked: bool):
         if hasattr(self, 'chk_reset_on_connect') and self.chk_reset_on_connect.isChecked() != checked:
@@ -619,13 +647,15 @@ class MainWindow(QMainWindow):
     def connect_serial(self):
         port = self.combo_port.currentData()
         if not port:
-            QMessageBox.warning(self, "Uyarı", "Lütfen geçerli bir seri port seçin.")
+            title = "Uyarı" if i18n.get_language() == "tr" else "Warning"
+            QMessageBox.warning(self, title, t("warn_select_port"))
             return
 
         try:
             baudrate = int(self.combo_baud.currentText())
         except ValueError:
-            QMessageBox.warning(self, "Hata", "Geçersiz Baud Rate.")
+            title = "Hata" if i18n.get_language() == "tr" else "Error"
+            QMessageBox.warning(self, title, t("warn_invalid_baud"))
             return
 
         auto_reconn = self.chk_auto_reconnect.isChecked()
@@ -640,7 +670,7 @@ class MainWindow(QMainWindow):
         self.lbl_status_archive.setText(f"📁 {archive_path.name}")
         self.lbl_status_archive.setToolTip(str(archive_path))
 
-        self.btn_connect.setText("⏳ Bağlanıyor...")
+        self.btn_connect.setText(t("btn_connecting"))
         self.serial_worker.start_connection(port, baudrate, auto_reconn, reset_on_conn)
 
     def disconnect_serial(self):
@@ -651,27 +681,27 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str, int)
     def on_serial_connected(self, port: str, baudrate: int):
         self.is_connected = True
-        self.btn_connect.setText("⏹️ Bağlantıyı Kes")
+        self.btn_connect.setText(t("btn_disconnect"))
         self.btn_connect.setObjectName("btnDisconnect")
         self.btn_connect.setStyle(self.btn_connect.style())
 
-        self.lbl_status_conn.setText(f"🟢 Bağlı: {port} @ {baudrate}")
+        self.lbl_status_conn.setText(t("status_connected", port=port, baudrate=baudrate))
         self.lbl_status_conn.setStyleSheet("color: #A6E3A1; font-weight: bold; padding: 0 10px;")
-        self.show_status_message(f"✓ {port} portuna {baudrate} baud ile başarıyla bağlanıldı.")
+        self.show_status_message(t("status_connected_msg", port=port, baudrate=baudrate))
 
     @pyqtSlot(str)
     def on_serial_disconnected(self, reason: str):
-        if not self.is_connected and self.btn_connect.text() == "⚡ Bağlan":
+        if not self.is_connected and self.btn_connect.text() == t("btn_connect"):
             return
         self.is_connected = False
-        self.btn_connect.setText("⚡ Bağlan")
+        self.btn_connect.setText(t("btn_connect"))
         self.btn_connect.setObjectName("btnConnect")
         self.btn_connect.setStyle(self.btn_connect.style())
 
-        self.lbl_status_conn.setText("⚪ Bağlı Değil")
+        self.lbl_status_conn.setText(t("status_disconnected"))
         self.lbl_status_conn.setStyleSheet("color: #CDD6F4; padding: 0 10px;")
-        self.lbl_status_archive.setText("📁 Arşiv: Kapalı")
-        self.show_status_message(f"Bağlantı kesildi: {reason}")
+        self.lbl_status_archive.setText(t("status_no_archive"))
+        self.show_status_message(t("status_disconnected_msg", reason=reason))
 
     @pyqtSlot(str, int)
     def on_serial_reconnecting(self, port: str, attempt: int):
@@ -800,6 +830,112 @@ class MainWindow(QMainWindow):
 
     def _on_timestamp_toggled(self, checked: bool):
         self.config.set("timestamp_enabled", checked)
+
+    def change_language(self, lang: str):
+        i18n.set_language(lang)
+        self.config.set("language", lang)
+        self.retranslate_ui()
+
+    def retranslate_ui(self):
+        # 1. Pencere Başlığı
+        self.setWindowTitle(t("app_title"))
+
+        # 2. Menü Çubuğu
+        if hasattr(self, 'menu_file'):
+            self.menu_file.setTitle(t("menu_file"))
+            self.act_add_ref.setText(t("act_new_ref"))
+            self.act_make_ref.setText(t("act_make_ref"))
+            self.act_open_archives.setText(t("act_archives"))
+            self.act_exit.setText(t("act_exit"))
+
+            self.menu_view.setTitle(t("menu_view"))
+            self.act_clear_all.setText(t("act_clear_all"))
+
+            self.menu_esp.setTitle(t("menu_esp"))
+            self.act_reset.setText(t("act_esp_reset"))
+            self.act_boot.setText(t("act_esp_boot"))
+            self.act_reset_on_conn.setText(t("act_reset_on_connect"))
+            self.act_reset_on_conn.setToolTip(t("act_reset_on_connect_tip"))
+
+            self.menu_lang.setTitle(t("menu_lang"))
+            self.act_lang_tr.setText(t("lang_tr"))
+            self.act_lang_en.setText(t("lang_en"))
+            self.act_lang_tr.setChecked(i18n.get_language() == "tr")
+            self.act_lang_en.setChecked(i18n.get_language() == "en")
+
+        # 3. Üst Kontrol Paneli
+        if hasattr(self, 'lbl_filter'):
+            self.lbl_filter.setText(t("lbl_filter"))
+            self.combo_filter.setItemText(0, t("filter_esp"))
+            self.combo_filter.setItemText(1, t("filter_arduino"))
+            self.combo_filter.setItemText(2, t("filter_usb"))
+            self.combo_filter.setItemText(3, t("filter_all"))
+
+            self.lbl_port.setText(t("lbl_port"))
+            self.btn_refresh.setToolTip(t("btn_refresh_tip"))
+            self.lbl_baud.setText(t("lbl_baud"))
+
+            if self.is_connected:
+                self.btn_connect.setText(t("btn_disconnect"))
+            else:
+                self.btn_connect.setText(t("btn_connect"))
+
+            self.chk_reset_on_connect.setText(t("chk_reset_on_connect"))
+            self.chk_reset_on_connect.setToolTip(t("chk_reset_on_connect_tip"))
+
+            self.chk_auto_reconnect.setText(t("chk_auto_reconnect"))
+            self.chk_auto_reconnect.setToolTip(t("chk_auto_reconnect_tip"))
+
+            self.btn_reset_esp.setText(t("btn_reset_esp"))
+            self.btn_reset_esp.setToolTip(t("btn_reset_esp_tip"))
+            self.btn_boot_esp.setText(t("btn_boot_esp"))
+            self.btn_boot_esp.setToolTip(t("btn_boot_esp_tip"))
+
+            self.btn_add_panel.setText(t("btn_add_panel"))
+            self.btn_add_panel.setToolTip(t("btn_add_panel_tip"))
+
+            self.chk_timestamp.setText(t("chk_timestamp"))
+            self.chk_autoscroll.setText(t("chk_autoscroll"))
+
+        # 4. Arama ve Filtreleme
+        if hasattr(self, 'lbl_search'):
+            self.lbl_search.setText(t("lbl_search"))
+            self.search_input.setPlaceholderText(t("search_placeholder"))
+            self.chk_only_matching.setText(t("chk_filter_simultaneous"))
+            self.chk_only_matching.setToolTip(t("chk_filter_simultaneous_tip"))
+            self.chk_search_regex.setText(t("chk_regex"))
+            self.chk_search_regex.setToolTip(t("chk_regex_tip"))
+            self.chk_search_case.setText(t("chk_case"))
+            self.chk_search_case.setToolTip(t("chk_case_tip"))
+            self.btn_copy_all.setText(t("btn_copy_matches"))
+            self.btn_copy_all.setToolTip(t("btn_copy_matches_tip"))
+
+            self.lbl_trigger.setText(t("lbl_trigger"))
+            self.trigger_input.setPlaceholderText(t("trigger_placeholder"))
+            self.chk_trigger_record.setText(t("chk_trigger_record"))
+            self.chk_trigger_record.setToolTip(t("chk_trigger_record_tip"))
+            self.chk_trigger_active.setText(t("chk_trigger_active"))
+
+        # 5. Komut Paneli
+        if hasattr(self, 'lbl_cmd'):
+            self.lbl_cmd.setText("Komut:" if i18n.get_language() == "tr" else "Command:")
+            self.cmd_input.setPlaceholderText(t("cmd_placeholder"))
+            self.btn_send.setText(t("btn_send"))
+
+        # 6. Durum Çubuğu
+        if hasattr(self, 'lbl_status_conn'):
+            if not self.is_connected:
+                self.lbl_status_conn.setText(t("status_disconnected"))
+            else:
+                self.lbl_status_conn.setText(t("status_connected", port=self.serial_worker.port, baudrate=self.serial_worker.baudrate))
+            if not getattr(self.archiver, 'current_file', None):
+                self.lbl_status_archive.setText(t("status_no_archive"))
+
+        # 7. Paneller
+        for idx, p in enumerate(self.panels):
+            if p == self.active_panel:
+                p.set_title(t("active_panel_title"))
+            p.retranslate_ui()
 
     def closeEvent(self, event):
         self.serial_worker.shutdown()

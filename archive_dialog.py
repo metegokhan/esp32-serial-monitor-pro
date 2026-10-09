@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 
 from archiver import SessionArchiver
+from i18n import t
 
 class ArchiveManagerDialog(QDialog):
     open_as_reference_requested = pyqtSignal(str, str)  # filepath, content
@@ -19,7 +20,7 @@ class ArchiveManagerDialog(QDialog):
     def __init__(self, archiver: SessionArchiver, parent=None):
         super().__init__(parent)
         self.archiver = archiver
-        self.setWindowTitle("📦 Oturum Arşivi ve Log Yöneticisi")
+        self.setWindowTitle(t("archive_title"))
         self.resize(850, 550)
         self.setStyleSheet("""
             QDialog {
@@ -77,11 +78,11 @@ class ArchiveManagerDialog(QDialog):
         # Üst Araç Çubuğu: Arama ve Klasörü Aç
         top_layout = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Arşiv dosyalarında veya portlarda ara...")
+        self.search_input.setPlaceholderText(t("archive_search_placeholder"))
         self.search_input.textChanged.connect(self.filter_archives)
         top_layout.addWidget(self.search_input)
 
-        btn_open_folder = QPushButton("📂 Arşiv Klasörünü Aç")
+        btn_open_folder = QPushButton(t("btn_open_folder"))
         btn_open_folder.clicked.connect(self.open_archive_folder)
         top_layout.addWidget(btn_open_folder)
 
@@ -93,7 +94,7 @@ class ArchiveManagerDialog(QDialog):
         # Tablo
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Dosya Adı", "Bağlantı Portu", "Tarih", "Boyut"])
+        self.table.setHorizontalHeaderLabels([t("col_filename"), "Port", t("col_datetime"), t("col_size")])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -106,7 +107,7 @@ class ArchiveManagerDialog(QDialog):
         # Önizleme
         self.preview_edit = QTextEdit()
         self.preview_edit.setReadOnly(True)
-        self.preview_edit.setPlaceholderText("Seçilen log dosyasının önizlemesi burada gösterilir...")
+        self.preview_edit.setPlaceholderText("...")
         splitter.addWidget(self.preview_edit)
 
         splitter.setSizes([500, 350])
@@ -115,23 +116,23 @@ class ArchiveManagerDialog(QDialog):
         # Alt Butonlar
         bottom_layout = QHBoxLayout()
 
-        self.btn_open_as_ref = QPushButton("📌 Referans Olarak Aç")
+        self.btn_open_as_ref = QPushButton(t("btn_archive_open_ref"))
         self.btn_open_as_ref.setStyleSheet("background-color: #0284C7; color: white; font-weight: bold;")
-        self.btn_open_as_ref.setToolTip("Seçili arşiv logunu ana penceredeki referans paneline aktarır")
+        self.btn_open_as_ref.setToolTip(t("btn_archive_open_ref_tip"))
         self.btn_open_as_ref.clicked.connect(self.open_selected_as_reference)
         bottom_layout.addWidget(self.btn_open_as_ref)
 
-        self.btn_export = QPushButton("💾 Seçili Logu Farklı Kaydet...")
+        self.btn_export = QPushButton(t("btn_archive_export"))
         self.btn_export.clicked.connect(self.export_selected)
         bottom_layout.addWidget(self.btn_export)
 
-        self.btn_delete = QPushButton("🗑️ Seçiliyi Sil")
+        self.btn_delete = QPushButton(t("btn_archive_delete"))
         self.btn_delete.clicked.connect(self.delete_selected)
         bottom_layout.addWidget(self.btn_delete)
 
         bottom_layout.addStretch()
 
-        btn_close = QPushButton("Kapat")
+        btn_close = QPushButton(t("btn_close"))
         btn_close.clicked.connect(self.accept)
         bottom_layout.addWidget(btn_close)
 
