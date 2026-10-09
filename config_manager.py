@@ -19,6 +19,7 @@ DEFAULT_CONFIG = {
     "archive_dir": DEFAULT_ARCHIVE_DIR,
     "line_ending": "\\r\\n",
     "font_size": 11,
+    "reset_on_connect": False,
     "command_history": []
 }
 

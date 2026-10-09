@@ -12,5 +12,6 @@
     "archive_dir": "/home/mete/.gemini/antigravity/scratch/esp32_serial_monitor/archives",
     "line_ending": "\\r\\n",
     "font_size": 11,
+    "reset_on_connect": false,
     "command_history": []
 }

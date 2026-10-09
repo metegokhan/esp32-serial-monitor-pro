@@ -204,6 +204,12 @@ class MainWindow(QMainWindow):
         act_boot.triggered.connect(self.enter_bootloader)
         esp_menu.addAction(act_boot)
 
+        esp_menu.addSeparator()
+        self.act_reset_on_conn = QAction("🔌 Bağlanırken Cihazı Resetle (DTR/RTS)", self, checkable=True)
+        self.act_reset_on_conn.setToolTip("Açıkken porta bağlanırken ESP32'yi resetler. Kapalıyken (Arduino gibi) cihaz kesintisiz çalışır.")
+        self.act_reset_on_conn.toggled.connect(self._on_reset_on_connect_toggled)
+        esp_menu.addAction(self.act_reset_on_conn)
+
     def _create_top_control_panel(self) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.setSpacing(6)
@@ -243,6 +249,16 @@ class MainWindow(QMainWindow):
         self.chk_auto_reconnect = QCheckBox("Oto-Bağlan")
         self.chk_auto_reconnect.setChecked(True)
         layout.addWidget(self.chk_auto_reconnect)
+
+        self.chk_reset_on_connect = QCheckBox("Bağlantıda Resetle")
+        self.chk_reset_on_connect.setToolTip(
+            "Bağlanırken Cihazı Resetle (DTR/RTS):\n"
+            "• İşaretli: Port açıldığında donanımsal reset atılır (boot loglarını baştan yakalamak için).\n"
+            "• İşaretsiz (Varsayılan): Tıpkı Arduino Serial Monitor gibi cihaz kesintisiz çalışmaya devam eder."
+        )
+        self.chk_reset_on_connect.setChecked(False)
+        self.chk_reset_on_connect.toggled.connect(self._on_reset_on_connect_toggled)
+        layout.addWidget(self.chk_reset_on_connect)
 
         layout.addSpacing(6)
 
@@ -570,6 +586,9 @@ class MainWindow(QMainWindow):
             self.combo_filter.setCurrentIndex(idx)
 
         self.chk_auto_reconnect.setChecked(self.config.get("auto_reconnect", True))
+        reset_on_conn = self.config.get("reset_on_connect", False)
+        self.chk_reset_on_connect.setChecked(reset_on_conn)
+        self.act_reset_on_conn.setChecked(reset_on_conn)
         self.chk_timestamp.setChecked(self.config.get("timestamp_enabled", False))
         self.chk_autoscroll.setChecked(self.config.get("auto_scroll", True))
 
@@ -577,6 +596,17 @@ class MainWindow(QMainWindow):
         self.chk_trigger_record.setChecked(self.config.get("trigger_record_enabled", False))
         self.chk_trigger_active.setChecked(bool(self.config.get("trigger_word", "")))
         self.update_trigger_settings()
+
+    def _on_reset_on_connect_toggled(self, checked: bool):
+        if hasattr(self, 'chk_reset_on_connect') and self.chk_reset_on_connect.isChecked() != checked:
+            self.chk_reset_on_connect.blockSignals(True)
+            self.chk_reset_on_connect.setChecked(checked)
+            self.chk_reset_on_connect.blockSignals(False)
+        if hasattr(self, 'act_reset_on_conn') and self.act_reset_on_conn.isChecked() != checked:
+            self.act_reset_on_conn.blockSignals(True)
+            self.act_reset_on_conn.setChecked(checked)
+            self.act_reset_on_conn.blockSignals(False)
+        self.config.set("reset_on_connect", checked)
 
     # --- Bağlantı Yönetimi ---
 
@@ -599,17 +629,19 @@ class MainWindow(QMainWindow):
             return
 
         auto_reconn = self.chk_auto_reconnect.isChecked()
+        reset_on_conn = self.chk_reset_on_connect.isChecked()
 
         self.config.set("last_port", port)
         self.config.set("last_baudrate", baudrate)
         self.config.set("auto_reconnect", auto_reconn)
+        self.config.set("reset_on_connect", reset_on_conn)
 
         archive_path = self.archiver.start_session(port)
         self.lbl_status_archive.setText(f"📁 {archive_path.name}")
         self.lbl_status_archive.setToolTip(str(archive_path))
 
         self.btn_connect.setText("⏳ Bağlanıyor...")
-        self.serial_worker.start_connection(port, baudrate, auto_reconn)
+        self.serial_worker.start_connection(port, baudrate, auto_reconn, reset_on_conn)
 
     def disconnect_serial(self):
         self.serial_worker.stop_connection()

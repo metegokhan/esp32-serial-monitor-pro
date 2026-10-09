@@ -50,7 +50,9 @@ ESP32, ESP8266, Arduino ve genel gömülü sistemler için geliştirilmiş, Pyth
 ### 7. 🔥 Tetikleyici Kelime ile Kayıt Başlatma (Trigger Recording)
 - Belirlenen bir tetikleyici kelime görüldüğünde ekrana bildirim çizgisi eklenir ve isteğe bağlı olarak ayrı bir dosyaya otomatik kayıt başlatılır.
 
-### 8. ⚡ ESP32 Donanım Kontrol Araçları
+### 8. ⚡ ESP32 Donanım Kontrol Araçları & Kesintisiz İzleme
+- **Kesintisiz İzleme (Arduino Serial Monitor Modu)**: Varsayılan olarak seri porta bağlanırken DTR/RTS hatları manipüle edilmez. Tıpkı Arduino Serial Monitor gibi, halihazırda çalışan ESP32/Arduino cihazınız resetlenmeden kesintisiz akmaya devam eder.
+- **"Bağlantıda Resetle" Seçeneği**: İstenirse araç çubuğundaki onay kutusu işaretlenerek ilk bağlantıda cihazın donanımsal olarak resetlenmesi ve boot loglarının en baştan yakalanması sağlanabilir.
 - **Reset (EN Pin)** (`F5`): DTR/RTS zamanlaması ile ESP32'yi donanımsal yeniden başlatır.
 - **Bootloader (IO0 Pin)** (`F6`): ESP32'yi ROM indirme / flaşlama moduna alır.
 - **Komut Gönderme Çubuğu**: Komut geçmişi hafızası ve satır sonu seçenekleri.

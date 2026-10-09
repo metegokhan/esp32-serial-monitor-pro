@@ -17,6 +17,7 @@ class SerialWorker(QThread):
         self.port: str = ""
         self.baudrate: int = 115200
         self.auto_reconnect: bool = False
+        self.reset_on_connect: bool = False
 
         self._ser: serial.Serial | None = None
         self._running: bool = False
@@ -27,14 +28,15 @@ class SerialWorker(QThread):
         self.tx_bytes: int = 0
         self._write_queue: list[bytes] = []
 
-    def configure(self, port: str, baudrate: int, auto_reconnect: bool = True):
+    def configure(self, port: str, baudrate: int, auto_reconnect: bool = True, reset_on_connect: bool = False):
         with QMutexLocker(self._mutex):
             self.port = port
             self.baudrate = baudrate
             self.auto_reconnect = auto_reconnect
+            self.reset_on_connect = reset_on_connect
 
-    def start_connection(self, port: str, baudrate: int, auto_reconnect: bool = True):
-        self.configure(port, baudrate, auto_reconnect)
+    def start_connection(self, port: str, baudrate: int, auto_reconnect: bool = True, reset_on_connect: bool = False):
+        self.configure(port, baudrate, auto_reconnect, reset_on_connect)
         self._should_connect = True
         if not self.isRunning():
             self._running = True
@@ -126,15 +128,20 @@ class SerialWorker(QThread):
             # Bağlantı açık değilse açmayı dene
             if not self._ser or not self._ser.is_open:
                 try:
-                    self._ser = serial.Serial(
-                        port=self.port,
-                        baudrate=self.baudrate,
-                        timeout=0.05,
-                        write_timeout=0.5
-                    )
-                    # Varsayılan DTR/RTS durumları
-                    self._ser.dtr = False
-                    self._ser.rts = False
+                    ser_obj = serial.Serial()
+                    ser_obj.port = self.port
+                    ser_obj.baudrate = self.baudrate
+                    ser_obj.timeout = 0.05
+                    ser_obj.write_timeout = 0.5
+                    ser_obj.open()
+
+                    with QMutexLocker(self._mutex):
+                        self._ser = ser_obj
+
+                    # Sadece kullanıcı özellikle istediyse bağlanırken resetle
+                    if self.reset_on_connect:
+                        self.reset_esp32()
+
                     reconnect_attempts = 0
                     self.connected.emit(self.port, self.baudrate)
                 except Exception as e:
