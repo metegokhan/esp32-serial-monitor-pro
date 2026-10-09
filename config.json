@@ -1,0 +1,16 @@
+{
+    "last_port": "/dev/ttyACM0",
+    "last_baudrate": 115200,
+    "device_filter": "esp",
+    "auto_reconnect": false,
+    "timestamp_enabled": true,
+    "auto_scroll": true,
+    "trigger_word": "",
+    "trigger_is_regex": false,
+    "trigger_record_enabled": true,
+    "max_buffer_lines": 30000,
+    "archive_dir": "/home/mete/.gemini/antigravity/scratch/esp32_serial_monitor/archives",
+    "line_ending": "\\r\\n",
+    "font_size": 11,
+    "command_history": []
+}
