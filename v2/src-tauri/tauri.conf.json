@@ -4,15 +4,15 @@
   "version": "2.0.0",
   "identifier": "com.metegokhan.esp32serialpro",
   "build": {
-    "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "ESP32 Serial Capture & Monitor Pro",
+        "url": "index.html",
         "width": 1400,
         "height": 880,
         "minWidth": 960,
