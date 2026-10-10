@@ -22,3 +22,8 @@ archives/*.log
 
 # System generated logs
 test_*.log
+
+# V2 Rust & Tauri
+v2/src-tauri/target/
+v2/node_modules/
+v2/dist/
