@@ -1,13 +1,37 @@
 @import "tailwindcss";
 
 @layer base {
-  body {
+  html, body {
+    color-scheme: dark;
     background-color: #0f111a;
     color: #cdd6f4;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     overflow: hidden;
     user-select: none;
   }
+
+  select, input, option {
+    color-scheme: dark;
+    background-color: #131522;
+    color: #cdd6f4;
+  }
+}
+
+/* Force dark style on native selects and options in WebKitGTK */
+select {
+  background-color: #131522 !important;
+  color: #cdd6f4 !important;
+  color-scheme: dark !important;
+}
+
+select:disabled {
+  background-color: #181a28 !important;
+  color: #6c7086 !important;
+}
+
+option {
+  background-color: #131522 !important;
+  color: #cdd6f4 !important;
 }
 
 /* Custom Cyber / Terminal Scrollbars */

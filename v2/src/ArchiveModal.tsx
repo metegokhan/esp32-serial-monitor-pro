@@ -90,7 +90,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="bg-[#181825] border border-slate-700/80 rounded-xl shadow-2xl w-full max-w-4xl h-[650px] flex flex-col overflow-hidden text-slate-200">
+      <div className="bg-[#181825] border border-slate-700/80 rounded-lg shadow-2xl w-full max-w-4xl h-[650px] flex flex-col overflow-hidden text-slate-200">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#1e1e2e]">
           <div className="flex items-center gap-3">

@@ -59,6 +59,46 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   const logContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Editable Quick Commands state with persistence
+  const [quickCommands, setQuickCommands] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('esp32_quick_commands');
+      return saved ? JSON.parse(saved) : ['help', 'status', 'version', 'reboot'];
+    } catch {
+      return ['help', 'status', 'version', 'reboot'];
+    }
+  });
+  const [editingCmdIdx, setEditingCmdIdx] = useState<number | null>(null);
+  const [editingCmdText, setEditingCmdText] = useState('');
+
+  const handleStartEditCmd = (idx: number, currentText: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingCmdIdx(idx);
+    setEditingCmdText(currentText);
+  };
+
+  const handleSaveCmd = (idx: number) => {
+    if (editingCmdIdx === null) return;
+    const trimmed = editingCmdText.trim();
+    const next = [...quickCommands];
+    if (trimmed) {
+      next[idx] = trimmed;
+    } else {
+      next.splice(idx, 1);
+    }
+    setQuickCommands(next);
+    localStorage.setItem('esp32_quick_commands', JSON.stringify(next));
+    setEditingCmdIdx(null);
+  };
+
+  const handleAddCmd = () => {
+    const next = [...quickCommands, 'custom'];
+    setQuickCommands(next);
+    setEditingCmdIdx(next.length - 1);
+    setEditingCmdText('custom');
+    localStorage.setItem('esp32_quick_commands', JSON.stringify(next));
+  };
+
   // Auto-scroll on new lines
   useEffect(() => {
     if (panel.autoScroll && logContainerRef.current) {
@@ -291,7 +331,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   return (
     <div
       style={{ width: `${panel.width}px` }}
-      className="relative flex flex-col shrink-0 h-full bg-[#161824] border border-slate-800 rounded-xl shadow-xl overflow-hidden text-slate-200 select-none transition-shadow hover:shadow-2xl hover:border-slate-700/80"
+      className="relative flex flex-col shrink-0 h-full bg-[#161824] border border-[#282b3d] rounded-lg shadow-xl overflow-hidden text-[#cdd6f4] select-none transition-shadow hover:shadow-2xl hover:border-[#3b3f5c]"
     >
       {/* 1. Panel Header */}
       <div className="flex flex-col border-b border-slate-800/90 bg-[#1c1e2e] p-2.5 gap-2">
@@ -318,14 +358,14 @@ export const LogPanel: React.FC<LogPanelProps> = ({
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => onMakeReference(panel.id)}
-              className="p-1.5 text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 rounded-md transition-colors"
+              className="p-1.5 text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 rounded-md transition-colors cursor-pointer"
               title={t('makeRefTip', lang)}
             >
               <Pin className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors cursor-pointer"
               title={t('loadLogTip', lang)}
             >
               <FolderOpen className="w-3.5 h-3.5" />
@@ -333,21 +373,21 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             <input type="file" ref={fileInputRef} onChange={handleFileLoad} className="hidden" accept=".log,.txt" />
             <button
               onClick={handleExportFull}
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors cursor-pointer"
               title={t('export', lang)}
             >
               <Download className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onUpdatePanel(panel.id, { lines: [], rawLines: [], pointA: null, pointB: null })}
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors cursor-pointer"
               title={t('clear', lang)}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onClosePanel(panel.id)}
-              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-md transition-colors"
+              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-md transition-colors cursor-pointer"
               title={t('close', lang)}
             >
               <X className="w-3.5 h-3.5" />
@@ -363,18 +403,19 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               value={panel.port}
               disabled={panel.isConnected}
               onChange={(e) => onUpdatePanel(panel.id, { port: e.target.value })}
-              className="w-full bg-[#12131d] border border-slate-700/70 text-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-500 disabled:opacity-50"
+              style={{ backgroundColor: '#131522', color: '#cdd6f4', colorScheme: 'dark' }}
+              className="w-full bg-[#131522] border border-[#2e324a] text-[#cdd6f4] rounded-md px-2 py-1 text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50 cursor-pointer"
             >
-              <option value="">{t('selectPort', lang)}</option>
+              <option value="" style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>{t('selectPort', lang)}</option>
               {availablePorts.map((p) => (
-                <option key={p.port_name} value={p.port_name}>
+                <option key={p.port_name} value={p.port_name} style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>
                   {p.display_name}
                 </option>
               ))}
             </select>
             <button
               onClick={onRefreshPorts}
-              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded"
+              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded cursor-pointer"
               title="Portları Yenile"
             >
               <RefreshCw className="w-3 h-3" />
@@ -386,10 +427,11 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             value={panel.baudRate}
             disabled={panel.isConnected}
             onChange={(e) => onUpdatePanel(panel.id, { baudRate: Number(e.target.value) })}
-            className="w-24 bg-[#12131d] border border-slate-700/70 text-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-500 disabled:opacity-50 font-mono"
+            style={{ backgroundColor: '#131522', color: '#cdd6f4', colorScheme: 'dark' }}
+            className="w-24 bg-[#131522] border border-[#2e324a] text-[#cdd6f4] rounded-md px-2 py-1 text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50 font-mono cursor-pointer"
           >
             {COMMON_BAUDS.map((b) => (
-              <option key={b} value={b}>
+              <option key={b} value={b} style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>
                 {b}
               </option>
             ))}
@@ -588,18 +630,43 @@ export const LogPanel: React.FC<LogPanelProps> = ({
         </div>
 
         {/* Quick Command Chips & Panel Footer Stats */}
-        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
-          <div className="flex items-center gap-1">
-            {['help', 'status', 'version', 'reboot'].map((cmd) => (
-              <button
-                key={cmd}
-                disabled={!panel.isConnected}
-                onClick={() => handleSendCommand(cmd)}
-                className="px-1.5 py-0.5 bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 hover:text-sky-300 rounded text-[10px] font-mono transition-colors disabled:opacity-40"
-              >
-                {cmd}
-              </button>
+        <div className="flex items-center justify-between text-[11px] text-[#6c7086] pt-0.5">
+          <div className="flex items-center gap-1 flex-wrap">
+            {quickCommands.map((cmd, idx) => (
+              editingCmdIdx === idx ? (
+                <input
+                  key={idx}
+                  autoFocus
+                  type="text"
+                  value={editingCmdText}
+                  onChange={(e) => setEditingCmdText(e.target.value)}
+                  onBlur={() => handleSaveCmd(idx)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveCmd(idx);
+                    if (e.key === 'Escape') setEditingCmdIdx(null);
+                  }}
+                  className="w-16 px-1.5 py-0.5 bg-[#0d0e15] border border-cyan-500 rounded text-[10px] font-mono text-cyan-300 outline-none shadow-sm"
+                />
+              ) : (
+                <button
+                  key={idx}
+                  disabled={!panel.isConnected}
+                  onClick={() => handleSendCommand(cmd)}
+                  onDoubleClick={(e) => handleStartEditCmd(idx, cmd, e)}
+                  title="Tek tık: Gönder | Çift tık: Düzenle"
+                  className="px-2 py-0.5 bg-[#181a28] hover:bg-[#25283d] text-[#a6adc8] hover:text-cyan-300 border border-[#2d3047] rounded text-[10px] font-mono transition-colors disabled:opacity-40 cursor-pointer"
+                >
+                  {cmd}
+                </button>
+              )
             ))}
+            <button
+              onClick={handleAddCmd}
+              title="Yeni Hızlı Komut Ekle"
+              className="px-1.5 py-0.5 bg-[#141522] hover:bg-[#25283d] text-[#6c7086] hover:text-cyan-300 border border-[#2d3047] rounded text-[10px] font-mono transition-colors cursor-pointer"
+            >
+              +
+            </button>
           </div>
 
           <div className="flex items-center gap-3 font-mono">
