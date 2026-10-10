@@ -320,7 +320,7 @@ export function App() {
               <Terminal className="w-4 h-4" />
             </div>
             <div>
-              <span className="font-bold text-sm tracking-wide text-white whitespace-nowrap">ESP32 Monitor Pro</span>
+              <span className="font-bold text-sm tracking-wide text-white whitespace-nowrap">Serial Monitor Pro</span>
             </div>
           </div>
 

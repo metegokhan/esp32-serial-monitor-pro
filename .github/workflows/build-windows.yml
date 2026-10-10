@@ -1,0 +1,54 @@
+name: "Build Windows & Linux Release"
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows (.exe & .msi)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install Rust Stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd v2
+          pnpm install
+
+      - name: Build Tauri Application
+        run: |
+          cd v2
+          pnpm tauri build
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Serial-Monitor-Pro-Windows
+          path: |
+            v2/src-tauri/target/release/bundle/nsis/*.exe
+            v2/src-tauri/target/release/bundle/msi/*.msi
+            v2/src-tauri/target/release/*.exe

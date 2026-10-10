@@ -650,11 +650,18 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               ) : (
                 <button
                   key={idx}
-                  disabled={!panel.isConnected}
-                  onClick={() => handleSendCommand(cmd)}
+                  onClick={() => {
+                    if (panel.isConnected) {
+                      handleSendCommand(cmd);
+                    } else {
+                      onNotification(lang === 'tr' ? 'Komut göndermek için önce porta bağlanın.' : 'Connect to port before sending.');
+                    }
+                  }}
                   onDoubleClick={(e) => handleStartEditCmd(idx, cmd, e)}
-                  title="Tek tık: Gönder | Çift tık: Düzenle"
-                  className="px-2 py-0.5 bg-[#181a28] hover:bg-[#25283d] text-[#a6adc8] hover:text-cyan-300 border border-[#2d3047] rounded text-[10px] font-mono transition-colors disabled:opacity-40 cursor-pointer"
+                  title={panel.isConnected ? 'Tek tık: Gönder | Çift tık: Düzenle' : 'Çift tık: Düzenle (Bağlı Değil)'}
+                  className={`px-2 py-0.5 bg-[#181a28] hover:bg-[#25283d] border border-[#2d3047] rounded text-[10px] font-mono transition-colors cursor-pointer ${
+                    panel.isConnected ? 'text-[#a6adc8] hover:text-cyan-300' : 'text-[#7d829e] hover:text-[#cdd6f4]'
+                  }`}
                 >
                   {cmd}
                 </button>

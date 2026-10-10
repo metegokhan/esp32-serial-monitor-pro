@@ -2,7 +2,7 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN="$DIR/v2/src-tauri/target/release/v2"
-APPIMAGE="$DIR/v2/src-tauri/target/release/bundle/appimage/ESP32 Serial Capture & Monitor Pro_2.0.0_amd64.AppImage"
+APPIMAGE="$DIR/v2/src-tauri/target/release/bundle/appimage/Serial Monitor Pro_2.0.0_amd64.AppImage"
 
 if [ -f "$BIN" ]; then
     exec "$BIN" "$@"

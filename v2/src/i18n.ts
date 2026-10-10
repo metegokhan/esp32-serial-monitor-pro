@@ -2,7 +2,7 @@ import { I18nLanguage } from './types';
 
 export const TRANSLATIONS = {
   tr: {
-    appTitle: 'ESP32 Serial Capture & Monitor Pro V2',
+    appTitle: 'Serial Monitor Pro',
     addPanel: 'Yeni Panel Ekle',
     archives: 'Oturum Arşivleri',
     clearAll: 'Tümünü Temizle',
@@ -71,7 +71,7 @@ export const TRANSLATIONS = {
     copiedMatchesMsg: 'Tüm panellerdeki eşleşen satırlar birleştirilip panoya kopyalandı.',
   },
   en: {
-    appTitle: 'ESP32 Serial Capture & Monitor Pro V2',
+    appTitle: 'Serial Monitor Pro',
     addPanel: 'Add Panel',
     archives: 'Session Archives',
     clearAll: 'Clear All',
