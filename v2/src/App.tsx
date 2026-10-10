@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage } from './types';
 import { LogPanel } from './LogPanel';
 import { ArchiveModal } from './ArchiveModal';
+import { AboutModal } from './AboutModal';
 import { t } from './i18n';
 import {
   Plus,
@@ -16,6 +17,7 @@ import {
   Layers,
   Filter,
   Terminal,
+  HelpCircle,
 } from 'lucide-react';
 
 const MAX_BUFFERED_LINES = 5000;
@@ -65,6 +67,7 @@ export function App() {
   const [globalHighlightWord, setGlobalHighlightWord] = useState('');
   const [triggerKeyword, setTriggerKeyword] = useState('');
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
 
@@ -316,6 +319,13 @@ export function App() {
         {/* Left: Branding & Action Buttons */}
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-2 mr-2">
+            <button
+              onClick={() => setIsAboutModalOpen(true)}
+              title={lang === 'tr' ? 'Genel Kullanım ve Hakkında (?)' : 'General Usage & About (?)'}
+              className="w-7 h-7 rounded-md bg-[#1e2030] hover:bg-[#282a3e] text-cyan-400 hover:text-cyan-300 border border-[#313244] flex items-center justify-center transition shadow-sm cursor-pointer shrink-0"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
             <div className="w-7 h-7 rounded-md bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
               <Terminal className="w-4 h-4" />
             </div>
@@ -521,6 +531,13 @@ export function App() {
         onClose={() => setIsArchiveModalOpen(false)}
         lang={lang}
         onOpenAsReference={handleOpenArchiveAsReference}
+      />
+
+      {/* About & General Usage Modal */}
+      <AboutModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
+        lang={lang}
       />
     </div>
   );
