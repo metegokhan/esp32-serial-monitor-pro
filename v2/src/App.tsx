@@ -22,6 +22,54 @@ import {
 
 const MAX_BUFFERED_LINES = 5000;
 
+const DEMO_LOGS_1 = [
+  "[12:00:01.010] [INFO] System initialized. Chip: ESP32-D0WDQ6 (revision 1)",
+  "[12:00:01.120] [INFO] Mounting virtual filesystem (/spiffs)... OK",
+  "[12:00:01.250] [INFO] Network interface initialized. MAC: 24:6F:28:AB:CD:EF",
+  "[12:00:01.400] [INFO] Connecting to AP 'Office_WiFi_2.4G'...",
+  "[12:00:02.150] [INFO] WiFi Connected! IP: 192.168.1.105, Gateway: 192.168.1.1",
+  "[12:00:02.320] [INFO] MQTT client connecting to mqtt://broker.emqx.io:1883...",
+  "[12:00:02.890] [INFO] MQTT connected successfully. Subscribed to 'devices/sensor/cmd'",
+  "[12:00:03.010] [DATA] Telemetry #1: temp=24.5C, humidity=48%, pressure=1013hPa",
+  "[12:00:04.010] [DATA] Telemetry #2: temp=24.6C, humidity=48%, pressure=1013hPa",
+  "[12:00:05.010] [DATA] Telemetry #3: temp=24.7C, humidity=47%, pressure=1013hPa",
+  "[12:00:06.010] [DATA] Telemetry #4: temp=24.6C, humidity=48%, pressure=1013hPa",
+  "[12:00:07.010] [DATA] Telemetry #5: temp=24.8C, humidity=47%, pressure=1013hPa",
+  "[12:00:08.010] [DATA] Telemetry #6: temp=25.0C, humidity=46%, pressure=1013hPa",
+  "[12:00:09.010] [INFO] Periodic memory check: free_heap=184320 bytes, min_free=180100"
+];
+
+const DEMO_LOGS_2 = [
+  "[11:45:00.001] ESP-ROM:esp32-20190601 Build:Jun 1 2019",
+  "[11:45:00.012] rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)",
+  "[11:45:00.025] configsip: 0, SPIWP:0xee",
+  "[11:45:00.038] clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00",
+  "[11:45:00.050] mode:DIO, clock div:2",
+  "[11:45:00.065] load:0x3fff0018,len:4",
+  "[11:45:00.078] load:0x3fff001c,len:1044",
+  "[11:45:00.092] load:0x40078000,len:8896",
+  "[11:45:00.105] load:0x40080400,len:5816",
+  "[11:45:00.120] entry 0x400806ac",
+  "[11:45:00.150] [INFO] Bootloader starting in normal mode",
+  "[11:45:00.180] [INFO] Flash size: 4MB, Flash frequency: 40MHz",
+  "[11:45:00.220] [INFO] Application partition loaded at 0x10000",
+  "[11:45:00.250] [INFO] Starting main application task..."
+];
+
+const DEMO_LOGS_3 = [
+  "[11:50:00.100] [UART] Initializing UART2 at 115200 baud (TX=17, RX=16)...",
+  "[11:50:00.105] [UART] Ready for external packet transmission",
+  "[11:50:01.002] [TX] 0xAA 0x05 0x01 0x20 0x55 [PING]",
+  "[11:50:01.015] [RX] 0xAA 0x05 0x02 0x20 0x56 [PONG] (latency: 13ms)",
+  "[11:50:02.002] [TX] 0xAA 0x08 0x10 0x00 0x00 0x00 0x01 0xB3 [GET_STATUS]",
+  "[11:50:02.020] [RX] 0xAA 0x08 0x11 0x01 0x00 0x00 0x00 0xB4 [STATUS_OK]",
+  "[11:50:03.002] [TX] 0xAA 0x06 0x30 0xFF 0x00 0x34 [SET_LED]",
+  "[11:50:03.018] [RX] 0xAA 0x06 0x31 0x00 0x00 0x37 [ACK]",
+  "[11:50:04.002] [TX] 0xAA 0x05 0x01 0x20 0x55 [PING]",
+  "[11:50:04.015] [RX] 0xAA 0x05 0x02 0x20 0x56 [PONG] (latency: 13ms)",
+  "[11:50:05.000] [UART] Packet test completed: 5 packets sent, 0 dropped"
+];
+
 function createSession(
   port: string = '',
   isReference: boolean = false,
@@ -103,8 +151,29 @@ export function App() {
   // Initial port discovery and initial panel
   useEffect(() => {
     refreshPorts().then((ports) => {
-      const defaultPort = ports.length > 0 ? ports[0].port_name : '';
-      setPanels([createSession(defaultPort, false)]);
+      const defaultPort = ports.length > 0 ? ports[0].port_name : '/dev/ttyUSB0';
+      const demo = new URLSearchParams(window.location.search).get('preview') || localStorage.getItem('esp32_demo_mode');
+      if (demo === 'multipanel' || demo === 'filtered') {
+        const p1 = createSession(defaultPort, false, DEMO_LOGS_1, 'Port: /dev/ttyUSB0 (ESP32 Live Stream)');
+        p1.isConnected = true;
+        p1.rxBytes = 18450;
+
+        const p2 = createSession('', true, DEMO_LOGS_2, 'Ref: ESP32 Bootloader Log');
+        p2.pointA = 3;
+        p2.pointB = 10;
+
+        const p3 = createSession('', true, DEMO_LOGS_3, 'Ref: UART Protocol Packets');
+
+        setPanels([p1, p2, p3]);
+        if (demo === 'filtered') {
+          setGlobalSearch('[DATA]');
+          setFilterMatchingOnly(true);
+        } else {
+          setGlobalHighlightWord('Telemetry');
+        }
+      } else {
+        setPanels([createSession(defaultPort, false)]);
+      }
     });
 
     // Auto-poll ports every 4 seconds to discover newly plugged devices
