@@ -68,6 +68,51 @@ fn get_archive_path() -> String {
     get_archive_dir().to_string_lossy().to_string()
 }
 
+#[tauri::command]
+async fn export_log_dialog(default_filename: String, content: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let file = rfd::FileDialog::new()
+            .set_file_name(&default_filename)
+            .add_filter("Log Files (*.log)", &["log"])
+            .add_filter("Text Files (*.txt)", &["txt"])
+            .add_filter("All Files (*.*)", &["*"])
+            .save_file();
+
+        if let Some(path) = file {
+            std::fs::write(&path, content).map_err(|e| format!("Dosya kaydedilemedi: {}", e))?;
+            Ok(Some(path.to_string_lossy().to_string()))
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn open_log_dialog() -> Result<Option<(String, String)>, String> {
+    tokio::task::spawn_blocking(move || {
+        let file = rfd::FileDialog::new()
+            .add_filter("Log & Text Files (*.log, *.txt)", &["log", "txt"])
+            .add_filter("All Files (*.*)", &["*"])
+            .pick_file();
+
+        if let Some(path) = file {
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Dosya okunamadı: {}", e))?;
+            let filename = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "imported.log".to_string());
+            Ok(Some((filename, content)))
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let serial_manager = Arc::new(SerialManager::new());
@@ -86,6 +131,8 @@ pub fn run() {
             read_archive_file,
             delete_archive_file,
             get_archive_path,
+            export_log_dialog,
+            open_log_dialog,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

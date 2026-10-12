@@ -230,32 +230,75 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   };
 
   // Export selected range
-  const handleExportRange = () => {
+  const handleExportRange = async () => {
     if (panel.pointA === null || panel.pointB === null) return;
     const [start, end] = [Math.min(panel.pointA, panel.pointB), Math.max(panel.pointA, panel.pointB)];
     const selected = panel.lines.slice(start, end + 1).join('\n');
-    const blob = new Blob([selected], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `range_${panel.port || 'log'}_${Date.now()}.log`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!selected) {
+      onNotification(lang === 'tr' ? 'Dışa aktarılacak satır yok.' : 'No lines to export.');
+      return;
+    }
+    const safePort = (panel.port || 'log').replace(/[^a-zA-Z0-9]/g, '_');
+    const defaultName = `Range_${safePort}_L${start + 1}-L${end + 1}_${Date.now()}.log`;
+    try {
+      const savedPath = await invoke<string | null>('export_log_dialog', {
+        defaultFilename: defaultName,
+        content: selected,
+      });
+      if (savedPath) {
+        onNotification(lang === 'tr' ? `Aralık kaydedildi: ${savedPath}` : `Range saved: ${savedPath}`);
+      }
+    } catch (err) {
+      console.error('Export range error:', err);
+      onNotification(`Hata: ${err}`);
+    }
   };
 
   // Export full log
-  const handleExportFull = () => {
+  const handleExportFull = async () => {
+    if (panel.lines.length === 0) {
+      onNotification(lang === 'tr' ? 'Dışa aktarılacak log bulunmuyor.' : 'No logs to export.');
+      return;
+    }
     const text = panel.lines.join('\n');
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ESP32_${panel.port.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.log`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const safePort = (panel.port || 'log').replace(/[^a-zA-Z0-9]/g, '_');
+    const defaultName = `Serial_${safePort}_${Date.now()}.log`;
+    try {
+      const savedPath = await invoke<string | null>('export_log_dialog', {
+        defaultFilename: defaultName,
+        content: text,
+      });
+      if (savedPath) {
+        onNotification(lang === 'tr' ? `Log dışa aktarıldı: ${savedPath}` : `Log exported: ${savedPath}`);
+      }
+    } catch (err) {
+      console.error('Export full error:', err);
+      onNotification(`Hata: ${err}`);
+    }
   };
 
-  // Load log file from disk
+  // Load log file from disk via native dialog or file input
+  const handleOpenFile = async () => {
+    try {
+      const res = await invoke<[string, string] | null>('open_log_dialog');
+      if (res) {
+        const [filename, content] = res;
+        const loadedLines = content.split(/\r?\n/);
+        onUpdatePanel(panel.id, {
+          lines: loadedLines,
+          rawLines: loadedLines,
+          title: `📌 ${filename}`,
+          isReference: true,
+        });
+        onNotification(lang === 'tr' ? `Log yüklendi: ${filename} (${loadedLines.length} satır)` : `Log loaded: ${filename} (${loadedLines.length} lines)`);
+      }
+    } catch (err) {
+      console.warn('Native open log error, fallback to file input:', err);
+      fileInputRef.current?.click();
+    }
+  };
+
+  // Fallback file load from input
   const handleFileLoad = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -269,7 +312,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
         title: `📌 ${file.name}`,
         isReference: true,
       });
-      onNotification(`Log yüklendi: ${file.name} (${loadedLines.length} satır)`);
+      onNotification(lang === 'tr' ? `Log yüklendi: ${file.name} (${loadedLines.length} satır)` : `Log loaded: ${file.name} (${loadedLines.length} lines)`);
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -364,7 +407,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               <Pin className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={handleOpenFile}
               className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/40 rounded-md transition-colors cursor-pointer"
               title={t('loadLogTip', lang)}
             >

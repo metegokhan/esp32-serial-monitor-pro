@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArchiveEntry, I18nLanguage } from './types';
 import { t } from './i18n';
-import { X, Search, FileText, Trash2, ExternalLink, RefreshCw, Folder } from 'lucide-react';
+import { X, Search, FileText, Trash2, ExternalLink, RefreshCw, Folder, Download } from 'lucide-react';
 
 interface ArchiveModalProps {
   isOpen: boolean;
@@ -70,6 +70,15 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
       onClose();
     } catch (err) {
       alert('Arşiv açılamadı: ' + String(err));
+    }
+  };
+
+  const handleExportArchive = async (entry: ArchiveEntry) => {
+    try {
+      const content = previewContent || (await invoke<string>('read_archive_file', { filepath: entry.path }));
+      await invoke('export_log_dialog', { defaultFilename: entry.filename, content });
+    } catch (err) {
+      alert('Dışa aktarma hatası: ' + String(err));
     }
   };
 
@@ -189,6 +198,14 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       {t('openAsRef', lang)}
+                    </button>
+                    <button
+                      onClick={() => handleExportArchive(selectedArchive)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium transition-colors shadow-sm"
+                      title={t('exportArchive', lang)}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      {t('exportArchive', lang)}
                     </button>
                     <button
                       onClick={() => handleDelete(selectedArchive)}
