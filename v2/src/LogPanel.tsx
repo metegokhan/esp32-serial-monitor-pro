@@ -630,9 +630,10 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                 {/* Gutter Line Number & Clickable Dot Marker */}
                 <div
                   onClick={() => handleGutterClick(originalIndex)}
-                  className="w-12 shrink-0 select-none text-right pr-3 text-slate-600 group-hover:text-slate-400 cursor-pointer flex items-center justify-end gap-1"
+                  className="w-12 shrink-0 select-none text-right pr-3 text-slate-600 group-hover:text-slate-400 cursor-pointer flex items-center justify-end gap-1 font-mono"
                   style={{
                     fontSize: `${Math.max(9, terminalFontSize - 1)}px`,
+                    lineHeight: `${Math.max(16, Math.round(terminalFontSize * 1.45))}px`,
                   }}
                 >
                   {isPointA ? (
@@ -652,7 +653,14 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                 </div>
 
                 {/* Log Line Content */}
-                <div className="flex-1 pl-1 pr-2 py-0.5 break-all">
+                <div
+                  className="flex-1 pl-1 pr-2 py-0.5 break-all select-text"
+                  style={{
+                    fontFamily: getFontCss(terminalFont),
+                    fontSize: `${terminalFontSize}px`,
+                    lineHeight: `${Math.max(16, Math.round(terminalFontSize * 1.45))}px`,
+                  }}
+                >
                   <SyntaxHighlighter
                     line={text}
                     highlightWord={globalHighlightWord}

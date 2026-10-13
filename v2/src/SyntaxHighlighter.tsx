@@ -14,7 +14,7 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
   // Check for critical crash headers
   if (line.includes('Guru Meditation Error') || line.includes('abort() was called')) {
     return (
-      <span className="text-rose-400 bg-rose-950/60 font-mono font-bold px-1.5 py-0.5 rounded ring-1 ring-rose-500/50">
+      <span className="text-rose-400 bg-rose-950/60 font-bold px-1.5 py-0.5 rounded ring-1 ring-rose-500/50">
         {line}
       </span>
     );
@@ -25,7 +25,7 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
   const tokens = line.match(tokenRegex) || [line];
 
   return (
-    <span className="font-mono text-xs leading-5">
+    <span>
       {tokens.map((token, index) => {
         // Whitespace preservation
         if (/^\s+$/.test(token)) {
