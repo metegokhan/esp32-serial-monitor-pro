@@ -98,6 +98,37 @@ export const LogPanel: React.FC<LogPanelProps> = ({
     setEditingCmdText(currentText);
   };
 
+  // Title Inline Editing state
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(panel.title);
+
+  useEffect(() => {
+    setTitleInput(panel.title);
+  }, [panel.title]);
+
+  const handleStartEditTitle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTitleInput(panel.title);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = () => {
+    setIsEditingTitle(false);
+    const trimmed = titleInput.trim();
+    if (trimmed && trimmed !== panel.title) {
+      onUpdatePanel(panel.id, { title: trimmed });
+    }
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSaveTitle();
+    } else if (e.key === 'Escape') {
+      setIsEditingTitle(false);
+      setTitleInput(panel.title);
+    }
+  };
+
   const handleSaveCmd = (idx: number) => {
     if (editingCmdIdx === null) return;
     const trimmed = editingCmdText.trim();
@@ -241,13 +272,47 @@ export const LogPanel: React.FC<LogPanelProps> = ({
     }
   };
 
+  // Copy all content of current panel
+  const handleCopyAll = () => {
+    const linesToCopy = displayedLines.map((l) => l.text);
+    if (linesToCopy.length === 0) {
+      onNotification(lang === 'tr' ? 'Kopyalanacak satır yok.' : 'No lines to copy.');
+      return;
+    }
+
+    let header = `${panel.title || 'Panel 1'}:\n`;
+    if (filterMatchingOnly && globalSearch.trim()) {
+      header = `filtered as: "${globalSearch.trim()}"\n${header}`;
+    }
+
+    const fullText = header + linesToCopy.join('\n');
+    navigator.clipboard.writeText(fullText);
+    onNotification(
+      lang === 'tr'
+        ? `"${panel.title}" panoya kopyalandı (${linesToCopy.length} satır).`
+        : `"${panel.title}" copied to clipboard (${linesToCopy.length} lines).`
+    );
+  };
+
   // Copy selected range
   const handleCopyRange = () => {
     if (panel.pointA === null || panel.pointB === null) return;
     const [start, end] = [Math.min(panel.pointA, panel.pointB), Math.max(panel.pointA, panel.pointB)];
     const selected = panel.lines.slice(start, end + 1).join('\n');
-    navigator.clipboard.writeText(selected);
+    let header = `[${panel.title || 'Panel'} (L${start + 1}-L${end + 1})]:\n`;
+    if (filterMatchingOnly && globalSearch.trim()) {
+      header = `filtered as: "${globalSearch.trim()}"\n${header}`;
+    }
+    navigator.clipboard.writeText(header + selected);
     onNotification(t('copiedRangeMsg', lang, { count: end - start + 1 }));
+  };
+
+  // Helper to get sanitized prefix for file naming
+  const getFileTitlePrefix = () => {
+    const raw = (panel.title || 'Panel')
+      .replace(/[^a-zA-Z0-9_\-\u00C0-\u017F]/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return raw || 'Panel';
   };
 
   // Export selected range
@@ -259,8 +324,9 @@ export const LogPanel: React.FC<LogPanelProps> = ({
       onNotification(lang === 'tr' ? 'Dışa aktarılacak satır yok.' : 'No lines to export.');
       return;
     }
-    const safePort = (panel.port || 'log').replace(/[^a-zA-Z0-9]/g, '_');
-    const defaultName = `Range_${safePort}_L${start + 1}-L${end + 1}_${Date.now()}.log`;
+    const prefix = getFileTitlePrefix();
+    const safePort = (panel.port || 'log').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const defaultName = `${prefix}_Range_${safePort}_L${start + 1}-L${end + 1}_${Date.now()}.log`;
     try {
       const savedPath = await invoke<string | null>('export_log_dialog', {
         defaultFilename: defaultName,
@@ -282,8 +348,9 @@ export const LogPanel: React.FC<LogPanelProps> = ({
       return;
     }
     const text = panel.lines.join('\n');
-    const safePort = (panel.port || 'log').replace(/[^a-zA-Z0-9]/g, '_');
-    const defaultName = `Serial_${safePort}_${Date.now()}.log`;
+    const prefix = getFileTitlePrefix();
+    const safePort = (panel.port || 'log').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const defaultName = `${prefix}_${safePort}_${Date.now()}.log`;
     try {
       const savedPath = await invoke<string | null>('export_log_dialog', {
         defaultFilename: defaultName,
@@ -401,9 +468,9 @@ export const LogPanel: React.FC<LogPanelProps> = ({
       <div className="flex flex-col border-b border-slate-800/90 bg-[#1c1e2e] p-2.5 gap-2">
         {/* Row 1: Title, Badges, Port, Baud, Connect & Actions */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 truncate">
+          <div className="flex items-center gap-2 truncate flex-1 min-w-0">
             <span
-              className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+              className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
                 panel.isConnected
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                   : panel.isReference
@@ -413,9 +480,25 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             >
               {panel.isConnected ? t('liveBadge', lang) : panel.isReference ? t('refBadge', lang) : 'OTURUM'}
             </span>
-            <span className="text-xs font-bold text-slate-100 truncate" title={panel.title}>
-              {panel.title}
-            </span>
+            {isEditingTitle ? (
+              <input
+                type="text"
+                autoFocus
+                value={titleInput}
+                onChange={(e) => setTitleInput(e.target.value)}
+                onBlur={handleSaveTitle}
+                onKeyDown={handleTitleKeyDown}
+                className="bg-[#12141f] border border-cyan-500 rounded px-1.5 py-0.5 text-xs font-bold text-cyan-200 outline-none w-full max-w-[200px]"
+              />
+            ) : (
+              <span
+                onDoubleClick={handleStartEditTitle}
+                className="text-xs font-bold text-slate-100 truncate cursor-pointer hover:text-cyan-300 transition-colors select-none"
+                title={lang === 'tr' ? 'Çift tıklayarak yeniden adlandırın' : 'Double-click to rename'}
+              >
+                {panel.title}
+              </span>
+            )}
           </div>
 
           {/* Quick Header Actions */}
@@ -426,6 +509,13 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               title={t('makeRefTip', lang)}
             >
               <Pin className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleCopyAll}
+              className="p-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-700/40 rounded-md transition-colors cursor-pointer"
+              title={lang === 'tr' ? 'Tüm içeriği kopyala' : 'Copy all content'}
+            >
+              <Copy className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={handleOpenFile}
@@ -599,8 +689,26 @@ export const LogPanel: React.FC<LogPanelProps> = ({
           lineHeight: `${Math.max(16, Math.round(terminalFontSize * 1.45))}px`,
         }}
       >
+        {/* Invisible header line for Ctrl+A selection */}
+        {displayedLines.length > 0 && (
+          <div
+            className="select-text pointer-events-none"
+            style={{
+              height: '1px',
+              marginTop: '-1px',
+              opacity: 0,
+              overflow: 'hidden',
+              whiteSpace: 'pre',
+              fontSize: '1px',
+              lineHeight: '1px',
+            }}
+            aria-hidden="true"
+          >
+            {`${filterMatchingOnly && globalSearch.trim() ? `filtered as: "${globalSearch.trim()}"\n` : ''}${panel.title || 'Panel 1'}:\n`}
+          </div>
+        )}
         {displayedLines.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-slate-600 text-xs italic">
+          <div className="h-full flex items-center justify-center text-slate-600 text-xs italic select-none">
             {panel.isConnected ? 'Veri bekleniyor...' : 'Bağlantı kapalı.'}
           </div>
         ) : (

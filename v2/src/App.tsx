@@ -82,7 +82,7 @@ function createSession(
   const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   return {
     id,
-    title: title || (isReference ? `Ref: ${port || 'Log'}` : (port ? `Port: ${port}` : 'Yeni Panel')),
+    title: title || (isReference ? `Ref: ${port || 'Log'}` : 'Panel 1'),
     port,
     baudRate: 115200,
     isConnected: false,
@@ -228,7 +228,7 @@ export function App() {
           setGlobalHighlightWord('Telemetry');
         }
       } else {
-        setPanels([createSession(defaultPort, false)]);
+        setPanels([createSession(defaultPort, false, [], 'Panel 1')]);
       }
     });
 
