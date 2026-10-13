@@ -6,6 +6,7 @@ import { LogPanel } from './LogPanel';
 import { ArchiveModal } from './ArchiveModal';
 import { AboutModal } from './AboutModal';
 import { t } from './i18n';
+import { isLineMatchingFilters, formatFilterDescription } from './filterUtils';
 import {
   Plus,
   FolderOpen,
@@ -111,7 +112,8 @@ export function App() {
 
   const [availablePorts, setAvailablePorts] = useState<SerialDeviceInfo[]>([]);
   const [panels, setPanels] = useState<PanelSession[]>([]);
-  const [globalSearch, setGlobalSearch] = useState('');
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [searchTagInput, setSearchTagInput] = useState('');
   const [filterMatchingOnly, setFilterMatchingOnly] = useState(false);
   const [matchCase, setMatchCase] = useState(false);
   const [isRegex, setIsRegex] = useState(false);
@@ -222,7 +224,7 @@ export function App() {
 
         setPanels([p1, p2, p3]);
         if (demo === 'filtered') {
-          setGlobalSearch('[DATA]');
+          setFilterTags(['[DATA]']);
           setFilterMatchingOnly(true);
         } else {
           setGlobalHighlightWord('Telemetry');
@@ -370,45 +372,79 @@ export function App() {
     showToast(t('copiedWordMsg', lang, { word }));
   };
 
+  // Multi-tag filter state helpers
+  const activeFilterTerms = React.useMemo(() => {
+    const terms = [...filterTags];
+    const trimmed = searchTagInput.trim();
+    if (trimmed && !terms.includes(trimmed)) {
+      terms.push(trimmed);
+    }
+    return terms;
+  }, [filterTags, searchTagInput]);
+
+  const handleAddTag = (tagText: string) => {
+    const trimmed = tagText.trim();
+    if (!trimmed) return;
+    const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      setFilterTags((prev) => {
+        const next = [...prev];
+        for (const p of parts) {
+          if (!next.includes(p)) next.push(p);
+        }
+        return next;
+      });
+      setSearchTagInput('');
+      setFilterMatchingOnly(true);
+    }
+  };
+
+  const handleRemoveTag = (tagToRemove: string) => {
+    setFilterTags((prev) => prev.filter((t) => t !== tagToRemove));
+  };
+
+  const handleClearAllFilters = () => {
+    setFilterTags([]);
+    setSearchTagInput('');
+  };
+
+  const handleSearchInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      handleAddTag(searchTagInput);
+    } else if (e.key === 'Backspace' && searchTagInput === '' && filterTags.length > 0) {
+      setFilterTags((prev) => prev.slice(0, prev.length - 1));
+    }
+  };
+
   // Copy all matched lines from all panels
   const handleCopyMatches = () => {
-    if (!globalSearch.trim()) {
-      showToast('Arama kutusu boş.');
+    if (activeFilterTerms.length === 0) {
+      showToast(lang === 'tr' ? 'Filtre boş.' : 'Filter is empty.');
       return;
-    }
-
-    let regex: RegExp | null = null;
-    try {
-      regex = new RegExp(globalSearch, matchCase ? '' : 'i');
-    } catch {
-      regex = null;
     }
 
     let matchedCount = 0;
     const outputLines: string[] = [];
+    const filterDesc = formatFilterDescription(activeFilterTerms);
+    outputLines.push(`filtered as: ${filterDesc}`);
 
     panels.forEach((p) => {
-      outputLines.push(`--- [${p.title || p.port || p.id}] ---`);
-      p.lines.forEach((line) => {
-        let isMatch = false;
-        if (regex) {
-          isMatch = regex.test(line);
-        } else {
-          isMatch = matchCase
-            ? line.includes(globalSearch)
-            : line.toLowerCase().includes(globalSearch.toLowerCase());
-        }
+      const panelMatches = p.lines.filter((line) =>
+        isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex)
+      );
 
-        if (isMatch) {
+      if (panelMatches.length > 0) {
+        outputLines.push(`\n--- [${p.title || p.port || p.id}] ---`);
+        panelMatches.forEach((line) => {
           outputLines.push(line);
           matchedCount++;
-        }
-      });
-      outputLines.push('');
+        });
+      }
     });
 
     if (matchedCount === 0) {
-      showToast('Eşleşen satır bulunamadı.');
+      showToast(lang === 'tr' ? 'Eşleşen satır bulunamadı.' : 'No matching lines found.');
       return;
     }
 
@@ -418,24 +454,17 @@ export function App() {
 
   // Compute total matched count across panels
   const totalMatchesCount = React.useMemo(() => {
-    if (!globalSearch.trim()) return 0;
-    let regex: RegExp | null = null;
-    try {
-      regex = new RegExp(globalSearch, matchCase ? '' : 'i');
-    } catch {
-      regex = null;
-    }
-
+    if (activeFilterTerms.length === 0) return 0;
     let count = 0;
     panels.forEach((p) => {
       p.lines.forEach((line) => {
-        if (regex ? regex.test(line) : matchCase ? line.includes(globalSearch) : line.toLowerCase().includes(globalSearch.toLowerCase())) {
+        if (isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex)) {
           count++;
         }
       });
     });
     return count;
-  }, [panels, globalSearch, matchCase]);
+  }, [panels, activeFilterTerms, matchCase, isRegex]);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0d0e15] text-[#cdd6f4] select-none font-sans overflow-hidden">
@@ -493,20 +522,62 @@ export function App() {
         </div>
 
         {/* Center: Global Search & Real-time Cross-Panel Filtering */}
-        <div className="flex-1 max-w-2xl flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] focus-within:border-cyan-500/70 rounded-md px-2.5 py-1 transition shadow-inner">
+        {/* Center: Global Multi-Tag Search & Real-time Cross-Panel Filtering (OR logic) */}
+        <div className="flex-1 max-w-2xl flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] focus-within:border-cyan-500/70 rounded-md px-2.5 py-1 transition shadow-inner min-w-[280px]">
           <Search className="w-4 h-4 text-[#6c7086] shrink-0" />
-          <input
-            type="text"
-            value={globalSearch}
-            onChange={(e) => setGlobalSearch(e.target.value)}
-            placeholder={t('searchPlaceholder', lang)}
-            className="flex-1 bg-transparent text-xs text-[#cdd6f4] placeholder-[#45475a] outline-none font-mono"
-          />
 
-          {globalSearch && (
+          {/* Tags + Input Flex Container */}
+          <div className="flex-1 flex items-center gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5">
+            {filterTags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono shrink-0 select-none animate-in fade-in zoom-in-95 duration-100"
+              >
+                <span className="truncate max-w-[120px]" title={tag}>{tag}</span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveTag(tag)}
+                  className="text-cyan-400 hover:text-white hover:bg-cyan-800/50 rounded w-3.5 h-3.5 flex items-center justify-center text-[10px] cursor-pointer"
+                  title={lang === 'tr' ? 'Filtreyi kaldır' : 'Remove filter'}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+
+            <input
+              type="text"
+              value={searchTagInput}
+              onChange={(e) => setSearchTagInput(e.target.value)}
+              onKeyDown={handleSearchInputKeyDown}
+              placeholder={
+                filterTags.length === 0
+                  ? t('searchPlaceholder', lang)
+                  : (lang === 'tr' ? '+ etiket ekle (Enter)...' : '+ add tag (Enter)...')
+              }
+              className="flex-1 min-w-[100px] bg-transparent text-xs text-[#cdd6f4] placeholder-[#45475a] outline-none font-mono"
+            />
+          </div>
+
+          {/* Add Tag Button if input has text */}
+          {searchTagInput.trim() && (
             <button
-              onClick={() => setGlobalSearch('')}
+              type="button"
+              onClick={() => handleAddTag(searchTagInput)}
+              className="px-1.5 py-0.5 rounded bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 text-[10px] font-mono border border-cyan-500/40 transition cursor-pointer shrink-0 whitespace-nowrap"
+              title={lang === 'tr' ? 'Filtre etiketi olarak ekle (Enter)' : 'Add as filter tag (Enter)'}
+            >
+              + {lang === 'tr' ? 'Ekle' : 'Add'}
+            </button>
+          )}
+
+          {/* Clear All Tags & Input */}
+          {(filterTags.length > 0 || searchTagInput) && (
+            <button
+              type="button"
+              onClick={handleClearAllFilters}
               className="text-[#6c7086] hover:text-white text-xs px-1 cursor-pointer shrink-0"
+              title={lang === 'tr' ? 'Tüm filtreleri temizle' : 'Clear all filters'}
             >
               ✕
             </button>
@@ -516,6 +587,7 @@ export function App() {
 
           {/* Filter Only Matching Toggle */}
           <button
+            type="button"
             onClick={() => setFilterMatchingOnly(!filterMatchingOnly)}
             title={t('filterMatchingOnlyTip', lang)}
             className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition cursor-pointer whitespace-nowrap shrink-0 ${
@@ -526,7 +598,7 @@ export function App() {
           >
             <Filter className="w-3 h-3 shrink-0" />
             <span className="truncate max-w-[125px] inline-block">{t('filterMatchingOnly', lang)}</span>
-            {globalSearch && (
+            {activeFilterTerms.length > 0 && (
               <span className="ml-0.5 px-1 py-0.2 text-[9px] rounded-full bg-[#181825] font-mono text-cyan-300 shrink-0">
                 {totalMatchesCount}
               </span>
@@ -535,6 +607,7 @@ export function App() {
 
           {/* Match Case */}
           <button
+            type="button"
             onClick={() => setMatchCase(!matchCase)}
             title={t('matchCase', lang)}
             className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold transition cursor-pointer shrink-0 ${
@@ -548,6 +621,7 @@ export function App() {
 
           {/* Regex */}
           <button
+            type="button"
             onClick={() => setIsRegex(!isRegex)}
             title={t('regex', lang)}
             className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold transition cursor-pointer shrink-0 ${
@@ -560,8 +634,9 @@ export function App() {
           </button>
 
           {/* Copy Matches */}
-          {globalSearch && (
+          {activeFilterTerms.length > 0 && (
             <button
+              type="button"
               onClick={handleCopyMatches}
               title={t('copyMatches', lang)}
               className="p-1 rounded-md text-[#a6adc8] hover:text-white hover:bg-[#1e2030] transition cursor-pointer shrink-0"
@@ -678,7 +753,7 @@ export function App() {
               onUpdatePanel={handleUpdatePanel}
               onClosePanel={handleClosePanel}
               onMakeReference={handleMakeReference}
-              globalSearch={globalSearch}
+              filterTerms={activeFilterTerms}
               filterMatchingOnly={filterMatchingOnly}
               matchCase={matchCase}
               isRegex={isRegex}

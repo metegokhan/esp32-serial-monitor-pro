@@ -4,6 +4,7 @@ import { PanelSession, SerialDeviceInfo, I18nLanguage } from './types';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { t } from './i18n';
 import { getFontCss } from './fontConfig';
+import { isLineMatchingFilters, formatFilterDescription } from './filterUtils';
 import {
   Play,
   Square,
@@ -27,7 +28,7 @@ interface LogPanelProps {
   onUpdatePanel: (id: string, updates: Partial<PanelSession>) => void;
   onClosePanel: (id: string) => void;
   onMakeReference: (id: string) => void;
-  globalSearch: string;
+  filterTerms: string[];
   filterMatchingOnly: boolean;
   matchCase: boolean;
   isRegex: boolean;
@@ -50,7 +51,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   onUpdatePanel,
   onClosePanel,
   onMakeReference,
-  globalSearch,
+  filterTerms,
   filterMatchingOnly,
   matchCase,
   isRegex,
@@ -281,8 +282,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
     }
 
     let header = `${panel.title || 'Panel 1'}:\n`;
-    if (filterMatchingOnly && globalSearch.trim()) {
-      header = `filtered as: "${globalSearch.trim()}"\n${header}`;
+    if (filterMatchingOnly && filterTerms.length > 0) {
+      header = `filtered as: ${formatFilterDescription(filterTerms)}\n${header}`;
     }
 
     const fullText = header + linesToCopy.join('\n');
@@ -300,8 +301,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
     const [start, end] = [Math.min(panel.pointA, panel.pointB), Math.max(panel.pointA, panel.pointB)];
     const selected = panel.lines.slice(start, end + 1).join('\n');
     let header = `[${panel.title || 'Panel'} (L${start + 1}-L${end + 1})]:\n`;
-    if (filterMatchingOnly && globalSearch.trim()) {
-      header = `filtered as: "${globalSearch.trim()}"\n${header}`;
+    if (filterMatchingOnly && filterTerms.length > 0) {
+      header = `filtered as: ${formatFilterDescription(filterTerms)}\n${header}`;
     }
     navigator.clipboard.writeText(header + selected);
     onNotification(t('copiedRangeMsg', lang, { count: end - start + 1 }));
@@ -406,32 +407,16 @@ export const LogPanel: React.FC<LogPanelProps> = ({
     e.target.value = '';
   };
 
-  // Filter lines if global search is active and filterMatchingOnly is true
+  // Filter lines if filterTerms are present and filterMatchingOnly is true
   const displayedLines = useMemo(() => {
-    if (!globalSearch.trim() || !filterMatchingOnly) {
+    if (filterTerms.length === 0 || !filterMatchingOnly) {
       return panel.lines.map((text, originalIndex) => ({ text, originalIndex }));
     }
 
-    try {
-      const pattern = isRegex
-        ? new RegExp(globalSearch, matchCase ? 'g' : 'gi')
-        : null;
-
-      return panel.lines
-        .map((text, originalIndex) => ({ text, originalIndex }))
-        .filter(({ text }) => {
-          if (pattern) {
-            return pattern.test(text);
-          }
-          if (matchCase) {
-            return text.includes(globalSearch);
-          }
-          return text.toLowerCase().includes(globalSearch.toLowerCase());
-        });
-    } catch {
-      return panel.lines.map((text, originalIndex) => ({ text, originalIndex }));
-    }
-  }, [panel.lines, globalSearch, filterMatchingOnly, matchCase, isRegex]);
+    return panel.lines
+      .map((text, originalIndex) => ({ text, originalIndex }))
+      .filter(({ text }) => isLineMatchingFilters(text, filterTerms, matchCase, isRegex));
+  }, [panel.lines, filterTerms, filterMatchingOnly, matchCase, isRegex]);
 
   // Width Resize Handler
   const handleMouseDownResize = (e: React.MouseEvent) => {
@@ -704,7 +689,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             }}
             aria-hidden="true"
           >
-            {`${filterMatchingOnly && globalSearch.trim() ? `filtered as: "${globalSearch.trim()}"\n` : ''}${panel.title || 'Panel 1'}:\n`}
+            {`${filterMatchingOnly && filterTerms.length > 0 ? `filtered as: ${formatFilterDescription(filterTerms)}\n` : ''}${panel.title || 'Panel 1'}:\n`}
           </div>
         )}
         {displayedLines.length === 0 ? (
@@ -724,6 +709,12 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               globalHighlightWord.length > 0 &&
               text.toLowerCase().includes(globalHighlightWord.toLowerCase());
 
+            // Check if line matches filter when not hiding other lines
+            const isFilterHit =
+              filterTerms.length > 0 &&
+              !filterMatchingOnly &&
+              isLineMatchingFilters(text, filterTerms, matchCase, isRegex);
+
             return (
               <div
                 key={originalIndex}
@@ -732,6 +723,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                     ? 'bg-sky-500/15 border-l-2 border-sky-400'
                     : hasHighlightWord
                     ? 'bg-amber-500/10'
+                    : isFilterHit
+                    ? 'bg-cyan-500/10 border-l border-cyan-400/50'
                     : ''
                 }`}
               >
@@ -772,6 +765,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                   <SyntaxHighlighter
                     line={text}
                     highlightWord={globalHighlightWord}
+                    filterTerms={filterTerms}
+                    matchCase={matchCase}
                     onWordClick={onWordClick}
                   />
                 </div>
@@ -867,7 +862,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
 
           <div className="flex items-center gap-3 font-mono">
             <span>
-              {filterMatchingOnly && globalSearch
+              {filterMatchingOnly && filterTerms.length > 0
                 ? t('filteredCount', lang, { matched: displayedLines.length, total: panel.lines.length })
                 : t('linesCount', lang, { count: panel.lines.length })}
             </span>

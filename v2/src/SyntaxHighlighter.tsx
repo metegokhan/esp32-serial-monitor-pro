@@ -3,12 +3,16 @@ import React, { memo } from 'react';
 interface SyntaxHighlighterProps {
   line: string;
   highlightWord?: string;
+  filterTerms?: string[];
+  matchCase?: boolean;
   onWordClick: (word: string) => void;
 }
 
 export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
   line,
   highlightWord,
+  filterTerms,
+  matchCase = false,
   onWordClick,
 }) => {
   // Check for critical crash headers
@@ -32,8 +36,22 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
           return <span key={index}>{token}</span>;
         }
 
-        const isHighlighted = highlightWord && highlightWord.length > 0 &&
-          token.toLowerCase() === highlightWord.toLowerCase();
+        const isFilterMatch =
+          filterTerms &&
+          filterTerms.length > 0 &&
+          filterTerms.some((ft) => {
+            const trimmed = ft.trim();
+            if (!trimmed) return false;
+            return matchCase
+              ? token.includes(trimmed)
+              : token.toLowerCase().includes(trimmed.toLowerCase());
+          });
+
+        const isHighlighted =
+          (highlightWord &&
+            highlightWord.length > 0 &&
+            token.toLowerCase() === highlightWord.toLowerCase()) ||
+          Boolean(isFilterMatch);
 
         // 1. Hex address / value: 0x...
         if (/^0x[0-9a-fA-F]+$/i.test(token)) {
