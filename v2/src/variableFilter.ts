@@ -1,10 +1,14 @@
 /**
  * Variable extraction and arithmetic/logic expression evaluation.
  *
- * Automatically parses `key: value` and `key = value` pairs from serial log lines,
- * and evaluates expressions like:
+ * Automatically parses:
+ *   1. Explicit pairs: `key: value`, `key = value`
+ *   2. Space-separated values: `aralik 69`, `gercek aralik 69 ms`, `latency 13 ms`, `temp 25.4 C`
+ *
+ * And evaluates expressions like:
  *   - `fps > 10`
  *   - `sync = true`
+ *   - `aralik > 50` / `gercek aralik > 50` / `gercek_aralik > 50`
  *   - `fps =! 15`
  *   - `fps > 5 ve sync = true`
  *   - `fps x audio > 1200`
@@ -17,37 +21,119 @@ export interface ExtractedVariables {
 
 const MISSING_VAL = Symbol('MISSING_VAL');
 
+// Standard physical/measurement units to avoid treating units as next variable names
+const COMMON_UNITS = new Set([
+  'ms', 'us', 'ns', 's', 'sec', 'min', 'h',
+  'hz', 'khz', 'mhz', 'ghz',
+  'fps', 'kbps', 'mbps', 'gbps', 'bps',
+  'b', 'bytes', 'byte', 'kb', 'mb', 'gb',
+  'v', 'mv', 'a', 'ma', 'ua', 'w', 'mw', 'kw',
+  'c', 'f', 'k', 'deg', 'celsius',
+  'db', 'dbm', 'px', 'pct', '%',
+  'rpm', 'kmh', 'mph', 'm/s'
+]);
+
+/**
+ * Normalizes Turkish letters for resilient matching (e.g. aralık <-> aralik).
+ */
+export function normalizeTurkish(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c');
+}
+
 /**
  * Extracts key-value variable pairs from a log line.
- * Pattern: "key" [whitespace] ":, =" [whitespace] "value"
+ * Supports:
+ * - "key : val" / "key = val"
+ * - "aralik 69" / "gercek aralik 69 ms"
  */
 export function extractVariablesFromLine(line: string): ExtractedVariables {
   const vars: ExtractedVariables = {};
   if (!line) return vars;
 
-  // Regex matches:
-  // (preceded by start of line or space or bracket/punctuation)
-  // group 1: key (alphanumeric identifier)
-  // [:=] with optional surrounding whitespace
-  // group 2/3/4: quoted string, or unquoted value
-  const regex = /(?:^|[\s,;\[\]\(\)\{\}])([a-zA-Z_][a-zA-Z0-9_]*)\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^\s,;\]\)\}\>]+))/g;
-
+  // Tokenize the line into words, numbers, and symbols
+  const tokenRegex = /([a-zA-Z_\u00C0-\u024F][a-zA-Z0-9_\u00C0-\u024F]*|-?\d+(?:\.\d+)?|[:=]|"[^"]*"|'[^']*')/g;
+  const lineTokens: { text: string; index: number }[] = [];
   let match: RegExpExecArray | null;
-  while ((match = regex.exec(line)) !== null) {
-    const key = match[1];
-    const rawVal = match[2] ?? match[3] ?? match[4];
-    if (rawVal !== undefined) {
-      const lower = rawVal.toLowerCase();
-      if (lower === 'true') {
-        vars[key] = true;
-      } else if (lower === 'false') {
-        vars[key] = false;
-      } else if (/^-?0x[0-9a-fA-F]+$/i.test(rawVal)) {
-        vars[key] = parseInt(rawVal, 16);
-      } else if (/^-?\d+(?:\.\d+)?$/.test(rawVal)) {
-        vars[key] = parseFloat(rawVal);
-      } else {
-        vars[key] = rawVal;
+
+  while ((match = tokenRegex.exec(line)) !== null) {
+    lineTokens.push({ text: match[1], index: match.index });
+  }
+
+  const setVar = (key: string, valStr: string) => {
+    const lower = valStr.toLowerCase();
+    let val: number | boolean | string;
+    if (lower === 'true') {
+      val = true;
+    } else if (lower === 'false') {
+      val = false;
+    } else if (/^-?0x[0-9a-fA-F]+$/i.test(valStr)) {
+      val = parseInt(valStr, 16);
+    } else if (/^-?\d+(?:\.\d+)?$/.test(valStr)) {
+      val = parseFloat(valStr);
+    } else {
+      val = valStr;
+    }
+
+    vars[key] = val;
+    vars[key.toLowerCase()] = val;
+    vars[normalizeTurkish(key)] = val;
+  };
+
+  // 1. Explicit key [:=] val
+  for (let i = 0; i < lineTokens.length - 2; i++) {
+    const kTok = lineTokens[i];
+    const opTok = lineTokens[i + 1];
+    const vTok = lineTokens[i + 2];
+
+    if (
+      /^[a-zA-Z_\u00C0-\u024F]/.test(kTok.text) &&
+      (opTok.text === ':' || opTok.text === '=')
+    ) {
+      setVar(kTok.text, vTok.text);
+    }
+  }
+
+  // 2. Space-separated: word(s) followed directly by number/boolean (e.g. "gercek aralik 69 ms")
+  for (let i = 0; i < lineTokens.length; i++) {
+    const cur = lineTokens[i].text;
+    const isNum = /^-?\d+(?:\.\d+)?$/.test(cur);
+    const isBool = cur.toLowerCase() === 'true' || cur.toLowerCase() === 'false';
+
+    if (isNum || isBool) {
+      const prev1 = lineTokens[i - 1];
+      if (prev1 && /^[a-zA-Z_\u00C0-\u024F]/.test(prev1.text)) {
+        if (prev1.text !== ':' && prev1.text !== '=') {
+          const varName1 = prev1.text;
+          setVar(varName1, cur);
+
+          // Check if there was another word preceding prev1 (e.g. "gercek aralik 69")
+          const prev2 = lineTokens[i - 2];
+          const prev3 = lineTokens[i - 3];
+          if (
+            prev2 &&
+            /^[a-zA-Z_\u00C0-\u024F]/.test(prev2.text) &&
+            prev2.text !== ':' &&
+            prev2.text !== '='
+          ) {
+            // Ensure prev2 is not a unit attached to an earlier number
+            const prev2IsUnit =
+              prev3 &&
+              /^-?\d+(?:\.\d+)?$/.test(prev3.text) &&
+              COMMON_UNITS.has(prev2.text.toLowerCase());
+
+            if (!prev2IsUnit) {
+              setVar(`${prev2.text}_${varName1}`, cur);
+              setVar(`${prev2.text} ${varName1}`, cur);
+            }
+          }
+        }
       }
     }
   }
@@ -73,7 +159,7 @@ export interface Token {
  * Tokenizes a variable expression string.
  */
 export function tokenizeExpression(input: string): Token[] {
-  const tokens: Token[] = [];
+  const rawTokens: Token[] = [];
   let i = 0;
   const len = input.length;
 
@@ -90,7 +176,7 @@ export function tokenizeExpression(input: string): Token[] {
     if (['==', '!=', '=!', '<=', '>=', '&&', '||', '<>'].includes(two)) {
       let op = two;
       if (op === '=!' || op === '<>') op = '!=';
-      tokens.push({ type: 'OP', val: op });
+      rawTokens.push({ type: 'OP', val: op });
       i += 2;
       continue;
     }
@@ -99,7 +185,7 @@ export function tokenizeExpression(input: string): Token[] {
     if (['=', '>', '<', '+', '-', '*', '/', '%', '!', '(', ')'].includes(ch)) {
       let op = ch;
       if (op === '=') op = '==';
-      tokens.push({
+      rawTokens.push({
         type: op === '(' ? 'LPAREN' : op === ')' ? 'RPAREN' : 'OP',
         val: op,
       });
@@ -117,7 +203,7 @@ export function tokenizeExpression(input: string): Token[] {
         i++;
       }
       i++; // skip closing quote
-      tokens.push({ type: 'STR', val: str });
+      rawTokens.push({ type: 'STR', val: str });
       continue;
     }
 
@@ -132,14 +218,14 @@ export function tokenizeExpression(input: string): Token[] {
         numStr.startsWith('0x') || numStr.startsWith('0X')
           ? parseInt(numStr, 16)
           : parseFloat(numStr);
-      tokens.push({ type: 'NUM', val });
+      rawTokens.push({ type: 'NUM', val });
       continue;
     }
 
-    // Identifiers or keyword operators
-    if (/[a-zA-Z_]/.test(ch)) {
+    // Identifiers or keyword operators (including Turkish characters)
+    if (/[a-zA-Z_\u00C0-\u024F]/.test(ch)) {
       let ident = '';
-      while (i < len && /[a-zA-Z0-9_]/.test(input[i])) {
+      while (i < len && /[a-zA-Z0-9_\u00C0-\u024F]/.test(input[i])) {
         ident += input[i];
         i++;
       }
@@ -147,58 +233,95 @@ export function tokenizeExpression(input: string): Token[] {
 
       // Check if "x" or "X" is used as multiplication operator: fps x audio
       if (lower === 'x') {
-        const prev = tokens[tokens.length - 1];
+        const prev = rawTokens[rawTokens.length - 1];
         if (prev && (prev.type === 'IDENT' || prev.type === 'NUM' || prev.type === 'RPAREN')) {
-          tokens.push({ type: 'OP', val: '*' });
+          rawTokens.push({ type: 'OP', val: '*' });
           continue;
         }
       }
 
       // Logical keywords
       if (lower === 've' || lower === 'and') {
-        tokens.push({ type: 'OP', val: '&&' });
+        rawTokens.push({ type: 'OP', val: '&&' });
         continue;
       }
       if (lower === 'veya' || lower === 'yada' || lower === 'or') {
-        tokens.push({ type: 'OP', val: '||' });
+        rawTokens.push({ type: 'OP', val: '||' });
         continue;
       }
       if (lower === 'not') {
-        tokens.push({ type: 'OP', val: '!' });
+        rawTokens.push({ type: 'OP', val: '!' });
         continue;
       }
       if (lower === 'true') {
-        tokens.push({ type: 'BOOL', val: true });
+        rawTokens.push({ type: 'BOOL', val: true });
         continue;
       }
       if (lower === 'false') {
-        tokens.push({ type: 'BOOL', val: false });
+        rawTokens.push({ type: 'BOOL', val: false });
         continue;
       }
 
-      // Skip optional Turkish filler words e.g. "ikincisi", "ikinci", "ise"
+      // Skip Turkish filler words
       if (['ikincisi', 'ikinci', 'ise', 'olarak'].includes(lower)) {
         continue;
       }
 
-      tokens.push({ type: 'IDENT', val: ident });
+      rawTokens.push({ type: 'IDENT', val: ident });
       continue;
     }
 
-    // Skip any other unrecognized character
     i++;
   }
 
-  return tokens;
+  // Post-processing:
+  // 1. Skip units following numbers (e.g. `aralik > 50 ms` -> `aralik > 50`)
+  // 2. Combine consecutive IDENT tokens into multi-word identifier (e.g. `gercek aralik` -> `gercek aralik`)
+  const cleaned: Token[] = [];
+  for (let k = 0; k < rawTokens.length; k++) {
+    const cur = rawTokens[k];
+    if (cur.type === 'IDENT' && COMMON_UNITS.has(cur.val.toLowerCase())) {
+      const prev = cleaned[cleaned.length - 1];
+      if (prev && prev.type === 'NUM') {
+        continue; // skip unit token following a number
+      }
+    }
+    cleaned.push(cur);
+  }
+
+  const finalTokens: Token[] = [];
+  let k = 0;
+  while (k < cleaned.length) {
+    const cur = cleaned[k];
+    if (
+      cur.type === 'IDENT' &&
+      k + 1 < cleaned.length &&
+      cleaned[k + 1].type === 'IDENT'
+    ) {
+      // Check next token is not a keyword
+      const nextLower = cleaned[k + 1].val.toLowerCase();
+      if (!['ve', 'and', 'yada', 'veya', 'or', 'not', 'x'].includes(nextLower)) {
+        finalTokens.push({
+          type: 'IDENT',
+          val: `${cur.val} ${cleaned[k + 1].val}`,
+        });
+        k += 2;
+        continue;
+      }
+    }
+    finalTokens.push(cur);
+    k++;
+  }
+
+  return finalTokens;
 }
 
 /**
- * Checks whether an input string looks like a variable expression
- * (e.g. contains comparison or arithmetic operators or logic keywords).
+ * Checks whether an input string looks like a variable expression.
  */
 export function isVariableExpression(input: string): boolean {
   if (!input) return false;
-  return /[:=<>!]|(\b(ve|and|yada|veya|or|not)\b)|(\b[a-zA-Z_][a-zA-Z0-9_]*\s+x\s+)/i.test(
+  return /[:=<>!]|(\b(ve|and|yada|veya|or|not)\b)|(\b[a-zA-Z_\u00C0-\u024F][a-zA-Z0-9_\u00C0-\u024F]*\s+x\s+)/i.test(
     input.trim()
   );
 }
@@ -225,20 +348,40 @@ export function evaluateVariableExpression(
   }
 
   function getVarVal(name: string): any {
-    if (matchCase) {
-      return vars[name] !== undefined ? vars[name] : MISSING_VAL;
-    }
+    if (vars[name] !== undefined) return vars[name];
+
     const lower = name.toLowerCase();
-    for (const k of Object.keys(vars)) {
-      if (k.toLowerCase() === lower) {
-        return vars[k];
+    if (vars[lower] !== undefined) return vars[lower];
+
+    const norm = normalizeTurkish(name);
+    if (vars[norm] !== undefined) return vars[norm];
+
+    const underscore = name.replace(/\s+/g, '_');
+    if (vars[underscore] !== undefined) return vars[underscore];
+    if (vars[underscore.toLowerCase()] !== undefined) return vars[underscore.toLowerCase()];
+    if (vars[normalizeTurkish(underscore)] !== undefined) return vars[normalizeTurkish(underscore)];
+
+    // If multi-word, check the last word as fallback (e.g. "gercek aralik" -> "aralik")
+    if (name.includes(' ') || name.includes('_')) {
+      const parts = name.split(/[\s_]+/);
+      const last = parts[parts.length - 1];
+      if (vars[last] !== undefined) return vars[last];
+      if (vars[last.toLowerCase()] !== undefined) return vars[last.toLowerCase()];
+      if (vars[normalizeTurkish(last)] !== undefined) return vars[normalizeTurkish(last)];
+    }
+
+    if (!matchCase) {
+      for (const k of Object.keys(vars)) {
+        if (normalizeTurkish(k) === norm) {
+          return vars[k];
+        }
       }
     }
+
     return MISSING_VAL;
   }
 
-  // Expression precedence hierarchy:
-  // parseOr -> parseAnd -> parseComparison -> parseAddSub -> parseMulDiv -> parseUnary -> parsePrimary
+  // Precedence: parseOr -> parseAnd -> parseComparison -> parseAddSub -> parseMulDiv -> parseUnary -> parsePrimary
 
   function parseOr(): any {
     let left = parseAnd();
@@ -267,9 +410,7 @@ export function evaluateVariableExpression(
       const op = consume()!.val;
       let right = parseAddSub();
 
-      // If either side is MISSING_VAL, check if the other is a string literal (e.g. status == OK)
       if (left !== MISSING_VAL && right === MISSING_VAL) {
-        // Look up if right was an identifier that can be treated as string literal
         const lastTok = tokens[pos - 1];
         if (lastTok && lastTok.type === 'IDENT') {
           right = lastTok.val;

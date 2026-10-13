@@ -43,7 +43,8 @@ const DEMO_LOGS_1 = [
   "[12:00:09.010] [INFO] Periodic memory check: free_heap=184320 bytes, min_free=180100",
   "[12:00:10.010] [vid] fps : 15 sync : true drop  = 3 audio= 123",
   "[12:00:11.010] [vid] fps : 16 sync : true drop  = 3 audio= 121",
-  "[12:00:12.010] [vid] fps : 10 sync : false drop  = 3 audio= 120"
+  "[12:00:12.010] [vid] fps : 10 sync : false drop  = 3 audio= 120",
+  "[12:00:13.010] [sensor] gercek aralik 69 ms latency 12 ms"
 ];
 
 const DEMO_LOGS_2 = [
