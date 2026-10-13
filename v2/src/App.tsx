@@ -20,7 +20,6 @@ import {
   Layers,
   Filter,
   Terminal,
-  HelpCircle,
   Type,
   Minus,
   Bookmark,
@@ -587,19 +586,18 @@ export function App() {
       <header className="h-13 min-h-13 bg-[#141622] border-b border-[#26283b] flex items-center justify-between px-3 gap-3 shrink-0 shadow-lg z-20">
         {/* Left: Branding & Action Buttons */}
         <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-2 mr-2">
-            <button
-              onClick={() => setIsAboutModalOpen(true)}
-              title={lang === 'tr' ? 'Genel Kullanım ve Hakkında (?)' : 'General Usage & About (?)'}
-              className="w-7 h-7 rounded-md bg-[#1e2030] hover:bg-[#282a3e] text-cyan-400 hover:text-cyan-300 border border-[#313244] flex items-center justify-center transition shadow-sm cursor-pointer shrink-0"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
-            <div className="w-7 h-7 rounded-md bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
+          <div
+            onClick={() => setIsAboutModalOpen(true)}
+            title={lang === 'tr' ? 'Serial Monitor Pro - Hakkında & Kılavuz' : 'Serial Monitor Pro - About & Guide'}
+            className="flex items-center gap-2 mr-1 cursor-pointer group select-none transition"
+          >
+            <div className="w-7 h-7 rounded-md bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20 group-hover:scale-105 group-hover:shadow-cyan-400/30 transition-transform">
               <Terminal className="w-4 h-4" />
             </div>
             <div>
-              <span className="font-bold text-sm tracking-wide text-white whitespace-nowrap">Serial Monitor Pro</span>
+              <span className="font-bold text-sm tracking-wide text-white group-hover:text-cyan-300 transition-colors whitespace-nowrap">
+                Serial Monitor Pro
+              </span>
             </div>
           </div>
 
@@ -622,10 +620,19 @@ export function App() {
           >
             <FolderOpen className="w-4 h-4 text-amber-400" />
           </button>
+
+          {/* Clear All Panels (Next to Archives) */}
+          <button
+            onClick={handleClearAll}
+            title={t('clearAll', lang)}
+            className="p-1.5 rounded-md bg-[#1e2030] text-[#6c7086] hover:text-rose-400 hover:bg-rose-950/30 border border-[#313244] transition cursor-pointer shrink-0"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Center: Global Multi-Tag Search & Real-time Cross-Panel Filtering (OR logic) */}
-        <div className="flex-1 max-w-2xl flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] focus-within:border-cyan-500/70 rounded-md px-2.5 py-1 transition shadow-inner min-w-[280px]">
+        <div className="flex-1 flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] focus-within:border-cyan-500/70 rounded-md px-2.5 py-1 transition shadow-inner min-w-[240px]">
           <Search className="w-4 h-4 text-[#6c7086] shrink-0" />
 
           {/* Tags + Input Flex Container */}
@@ -784,17 +791,16 @@ export function App() {
           <button
             type="button"
             onClick={() => setFilterMatchingOnly(!filterMatchingOnly)}
-            title={t('filterMatchingOnlyTip', lang)}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition cursor-pointer whitespace-nowrap shrink-0 ${
+            title={`${t('filterMatchingOnly', lang)}:\n${t('filterMatchingOnlyTip', lang)}`}
+            className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer whitespace-nowrap shrink-0 ${
               filterMatchingOnly
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/10'
                 : 'text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#1e2030]'
             }`}
           >
-            <Filter className="w-3 h-3 shrink-0" />
-            <span className="truncate max-w-[125px] inline-block">{t('filterMatchingOnly', lang)}</span>
+            <Filter className="w-3.5 h-3.5 shrink-0" />
             {activeFilterTerms.length > 0 && (
-              <span className="ml-0.5 px-1 py-0.2 text-[9px] rounded-full bg-[#181825] font-mono text-cyan-300 shrink-0">
+              <span className="px-1 py-0.2 text-[9px] rounded-full bg-[#181825] font-mono text-cyan-300 shrink-0">
                 {totalMatchesCount}
               </span>
             )}
@@ -864,15 +870,6 @@ export function App() {
             <Bookmark className="w-3.5 h-3.5" />
           </button>
 
-          {/* Clear All Panels (Çöp Kovası - Kayıtlı Filtrelerin Yanında!) */}
-          <button
-            type="button"
-            onClick={handleClearAll}
-            title={t('clearAll', lang)}
-            className="p-1 rounded-md text-[#6c7086] hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer shrink-0"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
         </div>
 
         {/* Right: Typography Popover & Language Switcher */}
