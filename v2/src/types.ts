@@ -60,6 +60,7 @@ export interface FilterPreset {
   id: string;
   name: string;
   tags: string[];
+  triggerTags?: string[];
   isVariableMode?: boolean;
   matchCase?: boolean;
   isRegex?: boolean;

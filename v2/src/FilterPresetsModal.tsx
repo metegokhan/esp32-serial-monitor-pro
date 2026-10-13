@@ -8,6 +8,7 @@ import {
   Trash2,
   Check,
   RotateCcw,
+  Target,
 } from 'lucide-react';
 
 const PRESETS_STORAGE_KEY = 'serial_filter_presets';
@@ -16,7 +17,8 @@ export const DEFAULT_PRESETS: FilterPreset[] = [
   {
     id: 'default_boot_wifi',
     name: 'ESP32 Boot & WiFi',
-    tags: ['rst:0x', 'boot:', 'WiFi Connected', 'IP:'],
+    tags: ['rst:0x', 'boot:', 'IP:'],
+    triggerTags: ['WiFi Connected'],
     isVariableMode: false,
     matchCase: false,
     isRegex: false,
@@ -25,7 +27,8 @@ export const DEFAULT_PRESETS: FilterPreset[] = [
   {
     id: 'default_errors',
     name: 'Hatalar & Uyarılar (Errors & Warnings)',
-    tags: ['Guru Meditation', 'abort()', '[E]', '[W]'],
+    tags: ['[E]', '[W]'],
+    triggerTags: ['Guru Meditation', 'abort()'],
     isVariableMode: false,
     matchCase: false,
     isRegex: false,
@@ -35,6 +38,7 @@ export const DEFAULT_PRESETS: FilterPreset[] = [
     id: 'default_video_sync',
     name: 'Değişken Modu: Video & Sync',
     tags: ['fps > 10 ve sync = true', 'audio > 120'],
+    triggerTags: [],
     isVariableMode: true,
     matchCase: false,
     isRegex: false,
@@ -44,6 +48,7 @@ export const DEFAULT_PRESETS: FilterPreset[] = [
     id: 'default_telemetry',
     name: 'Telemetri & Sensör Aralık',
     tags: ['temp > 24.6', 'gercek aralik'],
+    triggerTags: [],
     isVariableMode: true,
     matchCase: false,
     isRegex: false,
@@ -56,6 +61,7 @@ interface FilterPresetsModalProps {
   onClose: () => void;
   lang: I18nLanguage;
   currentTags: string[];
+  currentTriggerTags?: string[];
   isVariableMode: boolean;
   matchCase: boolean;
   isRegex: boolean;
@@ -68,6 +74,7 @@ export const FilterPresetsModal: React.FC<FilterPresetsModalProps> = ({
   onClose,
   lang,
   currentTags,
+  currentTriggerTags = [],
   isVariableMode,
   matchCase,
   isRegex,
@@ -108,11 +115,12 @@ export const FilterPresetsModal: React.FC<FilterPresetsModalProps> = ({
       return;
     }
 
-    if (currentTags.length === 0) {
+    const totalCount = currentTags.length + currentTriggerTags.length;
+    if (totalCount === 0) {
       onNotification(
         isTr
-          ? 'Kaydedilecek aktif filtre etiketi yok. Önce üst çubuğa filtreler ekleyin.'
-          : 'No active filter tags to save. Add some filter tags in the toolbar first.'
+          ? 'Kaydedilecek aktif filtre veya tetikleyici etiketi yok. Önce üst çubuğa etiketler ekleyin.'
+          : 'No active filter or trigger tags to save. Add some tags in the toolbar first.'
       );
       return;
     }
@@ -121,6 +129,7 @@ export const FilterPresetsModal: React.FC<FilterPresetsModalProps> = ({
       id: `preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: trimmedName,
       tags: [...currentTags],
+      triggerTags: [...currentTriggerTags],
       isVariableMode,
       matchCase,
       isRegex,
@@ -213,8 +222,20 @@ export const FilterPresetsModal: React.FC<FilterPresetsModalProps> = ({
             </div>
 
             {/* Current Active Tags Preview */}
-            {currentTags.length > 0 ? (
+            {currentTags.length > 0 || currentTriggerTags.length > 0 ? (
               <div className="flex flex-wrap items-center gap-1.5 p-2 bg-[#141622] border border-[#26283b] rounded-md">
+                {/* Triggers first */}
+                {currentTriggerTags.map((tag) => (
+                  <span
+                    key={`trig_${tag}`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border border-rose-500/50 bg-rose-950/80 text-rose-300"
+                    title={isTr ? 'Tetikleyici etiket' : 'Trigger tag'}
+                  >
+                    <Target className="w-3 h-3 text-rose-400 shrink-0" />
+                    <span>{tag}</span>
+                  </span>
+                ))}
+                {/* Normal filter tags */}
                 {currentTags.map((tag, idx) => {
                   const theme = getTagThemeByIndex(idx);
                   return (
@@ -246,8 +267,8 @@ export const FilterPresetsModal: React.FC<FilterPresetsModalProps> = ({
             ) : (
               <p className="text-[11px] text-[#6c7086] italic">
                 {isTr
-                  ? 'Şu anda üst filtre çubuğunda eklenmiş etiket bulunmuyor.'
-                  : 'No filter tags are currently active in the top bar.'}
+                  ? 'Şu anda üst filtre çubuğunda eklenmiş etiket veya tetikleyici bulunmuyor.'
+                  : 'No filter tags or triggers are currently active in the top bar.'}
               </p>
             )}
 
@@ -368,8 +389,18 @@ export const FilterPresetsModal: React.FC<FilterPresetsModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Tag Pills Preview */}
+                    {/* Tag Pills Preview: Triggers first, then filters */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {preset.triggerTags && preset.triggerTags.map((tag) => (
+                        <span
+                          key={`preset_trig_${tag}`}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border border-rose-500/50 bg-rose-950/80 text-rose-300"
+                          title={isTr ? 'Tetikleyici etiket' : 'Trigger tag'}
+                        >
+                          <Target className="w-3 h-3 text-rose-400 shrink-0" />
+                          <span>{tag}</span>
+                        </span>
+                      ))}
                       {preset.tags.map((tag, idx) => {
                         const theme = getTagThemeByIndex(idx);
                         return (

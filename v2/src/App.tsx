@@ -24,8 +24,9 @@ import {
   Type,
   Minus,
   Bookmark,
+  Target,
 } from 'lucide-react';
-import { FONT_OPTIONS, FONT_SIZE_OPTIONS } from './fontConfig';
+import { FONT_OPTIONS } from './fontConfig';
 
 const MAX_BUFFERED_LINES = 5000;
 
@@ -126,10 +127,12 @@ export function App() {
   const [isRegex, setIsRegex] = useState(false);
   const [isVariableMode, setIsVariableMode] = useState(false);
   const [globalHighlightWord, setGlobalHighlightWord] = useState('');
-  const [triggerKeyword, setTriggerKeyword] = useState('');
+  const [triggerTags, setTriggerTags] = useState<string[]>([]);
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isFilterPresetsModalOpen, setIsFilterPresetsModalOpen] = useState(false);
+  const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
+  const fontMenuRef = useRef<HTMLDivElement>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
@@ -186,6 +189,21 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleZoomIn, handleZoomOut]);
+
+  // Close font menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (fontMenuRef.current && !fontMenuRef.current.contains(e.target as Node)) {
+        setIsFontMenuOpen(false);
+      }
+    };
+    if (isFontMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isFontMenuOpen]);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimeoutRef.current) {
@@ -261,9 +279,18 @@ export function App() {
       unlistenData = await listen<SerialDataPayload>('serial-data', (event) => {
         const payload = event.payload;
 
-        // Check trigger keyword if set
-        if (triggerKeyword.trim() && payload.line.toLowerCase().includes(triggerKeyword.toLowerCase())) {
-          showToast(`⚡ Tetikleyici Yakalandı: "${triggerKeyword}"`);
+        // Check trigger tags if set
+        if (triggerTags.length > 0) {
+          triggerTags.forEach((trig) => {
+            const trimmed = trig.trim();
+            if (trimmed && payload.line.toLowerCase().includes(trimmed.toLowerCase())) {
+              showToast(
+                lang === 'tr'
+                  ? `🎯 Tetikleyici Yakalandı: "${trimmed}"`
+                  : `🎯 Trigger Caught: "${trimmed}"`
+              );
+            }
+          });
         }
 
         setPanels((prevPanels) =>
@@ -311,7 +338,7 @@ export function App() {
       if (unlistenData) unlistenData();
       if (unlistenStatus) unlistenStatus();
     };
-  }, [triggerKeyword, showToast]);
+  }, [triggerTags, showToast, lang]);
 
   // Panel Management
   const handleAddPanel = () => {
@@ -382,15 +409,15 @@ export function App() {
     showToast(t('copiedWordMsg', lang, { word }));
   };
 
-  // Multi-tag filter state helpers
+  // Multi-tag filter state helpers: trigger tags + normal filter tags
   const activeFilterTerms = React.useMemo(() => {
-    const terms = [...filterTags];
+    const terms = [...triggerTags, ...filterTags];
     const trimmed = searchTagInput.trim();
     if (trimmed && !terms.includes(trimmed)) {
       terms.push(trimmed);
     }
     return terms;
-  }, [filterTags, searchTagInput]);
+  }, [triggerTags, filterTags, searchTagInput]);
 
   // When hovering over a specific tag pill, isolate and show ONLY that tag across panels
   const effectiveFilterTerms = React.useMemo(() => {
@@ -409,8 +436,18 @@ export function App() {
         });
         return next;
       });
+      if (preset.triggerTags && preset.triggerTags.length > 0) {
+        setTriggerTags((prev) => {
+          const next = [...prev];
+          preset.triggerTags!.forEach((t) => {
+            if (!next.includes(t)) next.push(t);
+          });
+          return next;
+        });
+      }
     } else {
       setFilterTags(preset.tags);
+      setTriggerTags(preset.triggerTags || []);
       if (preset.isVariableMode !== undefined) setIsVariableMode(preset.isVariableMode);
       if (preset.matchCase !== undefined) setMatchCase(preset.matchCase);
       if (preset.isRegex !== undefined) setIsRegex(preset.isRegex);
@@ -421,6 +458,33 @@ export function App() {
         ? `"${preset.name}" şablonu ${append ? 'eklendi' : 'yüklendi'}.`
         : `${append ? 'Appended' : 'Applied'} "${preset.name}" preset.`
     );
+  };
+
+  const handleAddTriggerTag = (tagText?: string) => {
+    const text = (tagText !== undefined ? tagText : searchTagInput).trim();
+    if (!text) return;
+    const parts = text.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      setTriggerTags((prev) => {
+        const next = [...prev];
+        for (const p of parts) {
+          if (!next.includes(p)) next.push(p);
+        }
+        return next;
+      });
+      setSearchTagInput('');
+      setFilterMatchingOnly(true);
+      showToast(
+        lang === 'tr'
+          ? `🎯 Tetikleyici eklendi: "${parts.join(', ')}"`
+          : `🎯 Added trigger: "${parts.join(', ')}"`
+      );
+    }
+  };
+
+  const handleRemoveTriggerTag = (tagToRemove: string) => {
+    setTriggerTags((prev) => prev.filter((t) => t !== tagToRemove));
+    if (hoveredTag === tagToRemove) setHoveredTag(null);
   };
 
   const handleAddTag = (tagText: string) => {
@@ -442,19 +506,29 @@ export function App() {
 
   const handleRemoveTag = (tagToRemove: string) => {
     setFilterTags((prev) => prev.filter((t) => t !== tagToRemove));
+    if (hoveredTag === tagToRemove) setHoveredTag(null);
   };
 
   const handleClearAllFilters = () => {
     setFilterTags([]);
+    setTriggerTags([]);
     setSearchTagInput('');
+    setHoveredTag(null);
   };
 
   const handleSearchInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
+    if (e.shiftKey && e.key === 'Enter') {
+      e.preventDefault();
+      handleAddTriggerTag(searchTagInput);
+    } else if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       handleAddTag(searchTagInput);
-    } else if (e.key === 'Backspace' && searchTagInput === '' && filterTags.length > 0) {
-      setFilterTags((prev) => prev.slice(0, prev.length - 1));
+    } else if (e.key === 'Backspace' && searchTagInput === '') {
+      if (filterTags.length > 0) {
+        setFilterTags((prev) => prev.slice(0, prev.length - 1));
+      } else if (triggerTags.length > 0) {
+        setTriggerTags((prev) => prev.slice(0, prev.length - 1));
+      }
     }
   };
 
@@ -529,46 +603,24 @@ export function App() {
             </div>
           </div>
 
-          <div className="h-5 w-px bg-[#26283b] mx-1" />
+          <div className="h-4 w-px bg-[#26283b] mx-0.5" />
 
-          {/* Add Panel */}
+          {/* Add Panel - Just '+' icon */}
           <button
             onClick={handleAddPanel}
             title={t('addPanel', lang)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/30 border border-cyan-500/30 transition shadow-sm cursor-pointer whitespace-nowrap"
+            className="p-1.5 rounded-md bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/30 hover:text-cyan-200 border border-cyan-500/40 transition shadow-sm cursor-pointer shrink-0"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{t('addPanel', lang)}</span>
+            <Plus className="w-4 h-4" />
           </button>
 
-          {/* Session Archives */}
+          {/* Session Archives - Just icon */}
           <button
             onClick={() => setIsArchiveModalOpen(true)}
             title={t('archives', lang)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-white hover:bg-[#282a3e] border border-[#313244] transition cursor-pointer whitespace-nowrap"
+            className="p-1.5 rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-amber-300 hover:bg-[#282a3e] border border-[#313244] transition cursor-pointer shrink-0"
           >
-            <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
-            <span>{t('archives', lang)}</span>
-          </button>
-
-          {/* Saved Filter Presets */}
-          <button
-            onClick={() => setIsFilterPresetsModalOpen(true)}
-            title={t('filterPresetsTip', lang)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-white hover:bg-[#282a3e] border border-[#313244] transition cursor-pointer whitespace-nowrap"
-          >
-            <Bookmark className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
-            <span>{t('filterPresets', lang)}</span>
-          </button>
-
-          {/* Clear All */}
-          <button
-            onClick={handleClearAll}
-            title={t('clearAll', lang)}
-            className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded-md bg-[#1e2030] text-[#6c7086] hover:text-red-400 hover:bg-red-950/30 border border-[#313244] transition cursor-pointer whitespace-nowrap"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{t('clearAll', lang)}</span>
+            <FolderOpen className="w-4 h-4 text-amber-400" />
           </button>
         </div>
 
@@ -578,6 +630,45 @@ export function App() {
 
           {/* Tags + Input Flex Container */}
           <div className="flex-1 flex items-center gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5">
+            {/* 1. FIRST: Trigger Tags (with Target icon) */}
+            {triggerTags.map((tag) => {
+              const isHovered = hoveredTag === tag;
+              return (
+                <span
+                  key={`trig_${tag}`}
+                  onMouseEnter={() => setHoveredTag(tag)}
+                  onMouseLeave={() => setHoveredTag(null)}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono shrink-0 select-none cursor-pointer transition-all border border-rose-500/60 bg-rose-950/80 text-rose-300 ${
+                    isHovered
+                      ? 'ring-2 ring-white/90 scale-105 shadow-md brightness-125 z-10'
+                      : hoveredTag
+                      ? 'opacity-35 scale-95'
+                      : 'hover:border-rose-400 hover:bg-rose-900/80'
+                  }`}
+                  title={
+                    lang === 'tr'
+                      ? `🎯 Tetikleyici: "${tag}"\nÜzerinde dur: Sadece bunu göster (Önizleme)\nKaldırmak için ✕ tıklayın`
+                      : `🎯 Trigger: "${tag}"\nHover: Show only this (Peek)\nClick ✕ to remove`
+                  }
+                >
+                  <Target className="w-3 h-3 text-rose-400 shrink-0" />
+                  <span className="truncate max-w-[120px] font-semibold">{tag}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveTriggerTag(tag);
+                    }}
+                    className="text-rose-400 hover:text-white hover:bg-rose-800/50 rounded w-3.5 h-3.5 flex items-center justify-center text-[10px] cursor-pointer"
+                    title={lang === 'tr' ? 'Tetikleyiciyi kaldır' : 'Remove trigger'}
+                  >
+                    ✕
+                  </button>
+                </span>
+              );
+            })}
+
+            {/* 2. SECOND: Normal Filter Tags (no target icon) */}
             {filterTags.map((tag, idx) => {
               const theme = getTagThemeByIndex(idx);
               const isHovered = hoveredTag === tag;
@@ -633,35 +724,55 @@ export function App() {
               onChange={(e) => setSearchTagInput(e.target.value)}
               onKeyDown={handleSearchInputKeyDown}
               placeholder={
-                filterTags.length === 0
+                filterTags.length === 0 && triggerTags.length === 0
                   ? isVariableMode
                     ? t('variableSearchPlaceholder', lang)
                     : t('searchPlaceholder', lang)
-                  : (lang === 'tr' ? '+ etiket ekle (Enter)...' : '+ add tag (Enter)...')
+                  : lang === 'tr'
+                  ? '+ filtre (Enter) / tetikleyici (🎯)...'
+                  : '+ filter (Enter) / trigger (🎯)...'
               }
-              className="flex-1 min-w-[100px] bg-transparent text-xs text-[#cdd6f4] placeholder-[#45475a] outline-none font-mono"
+              className="flex-1 min-w-[90px] bg-transparent text-xs text-[#cdd6f4] placeholder-[#45475a] outline-none font-mono"
             />
           </div>
 
-          {/* Add Tag Button if input has text */}
+          {/* Add Target / Trigger Tag Button (Nişan ikonu) */}
+          <button
+            type="button"
+            onClick={() => handleAddTriggerTag()}
+            className={`p-1 rounded transition cursor-pointer shrink-0 ${
+              searchTagInput.trim()
+                ? 'text-rose-400 hover:text-white bg-rose-950/70 hover:bg-rose-900 border border-rose-500/50 animate-pulse'
+                : 'text-[#6c7086] hover:text-rose-400'
+            }`}
+            title={
+              lang === 'tr'
+                ? '🎯 Tetikleyici Ekle: Yazılan kelimeyi hedef tetikleyici olarak ekler'
+                : '🎯 Add Trigger: Add current word as target trigger'
+            }
+          >
+            <Target className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Add Normal Tag Button if input has text */}
           {searchTagInput.trim() && (
             <button
               type="button"
               onClick={() => handleAddTag(searchTagInput)}
               className="px-1.5 py-0.5 rounded bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 text-[10px] font-mono border border-cyan-500/40 transition cursor-pointer shrink-0 whitespace-nowrap"
-              title={lang === 'tr' ? 'Filtre etiketi olarak ekle (Enter)' : 'Add as filter tag (Enter)'}
+              title={lang === 'tr' ? 'Normal filtre etiketi olarak ekle (Enter)' : 'Add as filter tag (Enter)'}
             >
-              + {lang === 'tr' ? 'Ekle' : 'Add'}
+              + {lang === 'tr' ? 'Filtre' : 'Filter'}
             </button>
           )}
 
           {/* Clear All Tags & Input */}
-          {(filterTags.length > 0 || searchTagInput) && (
+          {(filterTags.length > 0 || triggerTags.length > 0 || searchTagInput) && (
             <button
               type="button"
               onClick={handleClearAllFilters}
               className="text-[#6c7086] hover:text-white text-xs px-1 cursor-pointer shrink-0"
-              title={lang === 'tr' ? 'Tüm filtreleri temizle' : 'Clear all filters'}
+              title={lang === 'tr' ? 'Tüm filtre ve tetikleyicileri temizle' : 'Clear all filters & triggers'}
             >
               ✕
             </button>
@@ -743,7 +854,7 @@ export function App() {
             </button>
           )}
 
-          {/* Quick Presets Icon */}
+          {/* Saved Filter Presets (Kayıtlı Filtreler) */}
           <button
             type="button"
             onClick={() => setIsFilterPresetsModalOpen(true)}
@@ -752,81 +863,125 @@ export function App() {
           >
             <Bookmark className="w-3.5 h-3.5" />
           </button>
+
+          {/* Clear All Panels (Çöp Kovası - Kayıtlı Filtrelerin Yanında!) */}
+          <button
+            type="button"
+            onClick={handleClearAll}
+            title={t('clearAll', lang)}
+            className="p-1 rounded-md text-[#6c7086] hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer shrink-0"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        {/* Right: Trigger Keyword & Language Switcher */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Trigger input */}
-          <div className="hidden lg:flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] rounded-md px-2 py-1">
-            <span className="text-[11px] text-[#6c7086] font-medium whitespace-nowrap">{t('triggerLabel', lang)}</span>
-            <input
-              type="text"
-              value={triggerKeyword}
-              onChange={(e) => setTriggerKeyword(e.target.value)}
-              placeholder={t('triggerPlaceholder', lang)}
-              className="w-36 bg-transparent text-xs text-amber-300 placeholder-[#45475a] outline-none font-mono"
-            />
-            {triggerKeyword && (
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+        {/* Right: Typography Popover & Language Switcher */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Typography Popover */}
+          <div className="relative">
+            <button
+              onClick={() => setIsFontMenuOpen(!isFontMenuOpen)}
+              title={lang === 'tr' ? 'Terminal Yazı Tipi & Boyutu' : 'Terminal Typography & Font Size'}
+              className={`p-1.5 rounded-md border transition cursor-pointer shrink-0 ${
+                isFontMenuOpen
+                  ? 'bg-cyan-600/30 text-cyan-300 border-cyan-500/50'
+                  : 'bg-[#1e2030] text-[#a6adc8] hover:text-white hover:bg-[#282a3e] border-[#313244]'
+              }`}
+            >
+              <Type className="w-4 h-4 text-cyan-400" />
+            </button>
+
+            {isFontMenuOpen && (
+              <div
+                ref={fontMenuRef}
+                className="absolute right-0 top-full mt-2 w-64 bg-[#141622] border border-[#2d3047] rounded-lg shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 duration-100 space-y-3"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-[#25283b]">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                    <Type className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{lang === 'tr' ? 'Yazı Tipi & Boyutu' : 'Typography'}</span>
+                  </div>
+                  <button
+                    onClick={() => setIsFontMenuOpen(false)}
+                    className="text-[#6c7086] hover:text-white text-xs cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Font Family Selection */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#6c7086] font-medium block">
+                    {lang === 'tr' ? 'Yazı Tipi (Font)' : 'Font Family'}
+                  </label>
+                  <select
+                    value={terminalFont}
+                    onChange={(e) => handleFontChange(e.target.value)}
+                    className="w-full bg-[#0d0e15] border border-[#2d3047] text-xs text-[#cdd6f4] rounded-md px-2 py-1.5 outline-none focus:border-cyan-500 cursor-pointer"
+                  >
+                    {FONT_OPTIONS.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Font Size & Zoom */}
+                <div className="space-y-1">
+                  <label className="text-[11px] text-[#6c7086] font-medium block">
+                    {lang === 'tr' ? 'Yazı Boyutu' : 'Font Size'}
+                  </label>
+                  <div className="flex items-center gap-2 bg-[#0d0e15] border border-[#2d3047] rounded-md p-1.5 justify-between">
+                    <button
+                      onClick={handleZoomOut}
+                      title={t('decreaseFontSize', lang)}
+                      className="p-1 rounded bg-[#1e2030] hover:bg-[#282a3e] text-[#a6adc8] hover:text-white transition cursor-pointer"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+
+                    <span className="font-mono font-bold text-xs text-cyan-300">
+                      {terminalFontSize}px
+                    </span>
+
+                    <button
+                      onClick={handleZoomIn}
+                      title={t('increaseFontSize', lang)}
+                      className="p-1 rounded bg-[#1e2030] hover:bg-[#282a3e] text-[#a6adc8] hover:text-white transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick size presets */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  {[10, 12, 14, 16, 18].map((sz) => (
+                    <button
+                      key={sz}
+                      onClick={() => handleFontSizeChange(sz)}
+                      className={`flex-1 py-1 rounded text-[10px] font-mono transition cursor-pointer border ${
+                        terminalFontSize === sz
+                          ? 'bg-cyan-600/30 text-cyan-300 border-cyan-500/50 font-bold'
+                          : 'bg-[#1e2030] text-[#a6adc8] hover:text-white border-[#313244]'
+                      }`}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Typography & Zoom Controls */}
-          <div className="flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] rounded-md px-2 py-1 shrink-0">
-            <Type className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <select
-              value={terminalFont}
-              onChange={(e) => handleFontChange(e.target.value)}
-              className="bg-transparent text-xs text-[#cdd6f4] outline-none border-none cursor-pointer max-w-[115px] truncate"
-              title={t('fontFamily', lang)}
-            >
-              {FONT_OPTIONS.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-
-            <div className="h-3.5 w-px bg-[#26283b] mx-0.5 shrink-0" />
-
-            <button
-              onClick={handleZoomOut}
-              title={t('decreaseFontSize', lang)}
-              className="p-0.5 text-[#6c7086] hover:text-white hover:bg-[#1e2030] rounded transition cursor-pointer shrink-0"
-            >
-              <Minus className="w-3 h-3" />
-            </button>
-
-            <select
-              value={terminalFontSize}
-              onChange={(e) => handleFontSizeChange(Number(e.target.value))}
-              className="bg-transparent text-[11px] font-mono font-bold text-cyan-300 outline-none border-none cursor-pointer px-0.5 shrink-0"
-              title={t('fontSize', lang)}
-            >
-              {FONT_SIZE_OPTIONS.map((sz) => (
-                <option key={sz} value={sz}>
-                  {sz}px
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={handleZoomIn}
-              title={t('increaseFontSize', lang)}
-              className="p-0.5 text-[#6c7086] hover:text-white hover:bg-[#1e2030] rounded transition cursor-pointer shrink-0"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
-
-          {/* Language Toggle */}
+          {/* Language Toggle - Just icon */}
           <button
             onClick={handleToggleLang}
-            title={t('language', lang)}
-            className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-semibold rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-white hover:bg-[#282a3e] border border-[#313244] transition cursor-pointer uppercase tracking-wider whitespace-nowrap"
+            title={lang === 'tr' ? 'Dil: Türkçe (Change to English)' : 'Language: English (Türkçe\'ye geç)'}
+            className="p-1.5 rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-cyan-300 hover:bg-[#282a3e] border border-[#313244] transition cursor-pointer shrink-0"
           >
-            <Languages className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{lang}</span>
+            <Languages className="w-4 h-4 text-cyan-400" />
           </button>
         </div>
       </header>
@@ -902,7 +1057,8 @@ export function App() {
         isOpen={isFilterPresetsModalOpen}
         onClose={() => setIsFilterPresetsModalOpen(false)}
         lang={lang}
-        currentTags={activeFilterTerms}
+        currentTags={filterTags}
+        currentTriggerTags={triggerTags}
         isVariableMode={isVariableMode}
         matchCase={matchCase}
         isRegex={isRegex}
