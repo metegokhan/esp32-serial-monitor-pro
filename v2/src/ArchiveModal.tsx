@@ -3,12 +3,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { ArchiveEntry, I18nLanguage } from './types';
 import { t } from './i18n';
 import { X, Search, FileText, Trash2, ExternalLink, RefreshCw, Folder, Download } from 'lucide-react';
+import { getFontCss } from './fontConfig';
 
 interface ArchiveModalProps {
   isOpen: boolean;
   onClose: () => void;
   lang: I18nLanguage;
   onOpenAsReference: (filepath: string, content: string, filename: string) => void;
+  terminalFont?: string;
+  terminalFontSize?: number;
 }
 
 export const ArchiveModal: React.FC<ArchiveModalProps> = ({
@@ -16,6 +19,8 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
   onClose,
   lang,
   onOpenAsReference,
+  terminalFont = 'JetBrains Mono',
+  terminalFontSize = 12,
 }) => {
   const [archives, setArchives] = useState<ArchiveEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -216,7 +221,13 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
                     </button>
                   </div>
                 </div>
-                <div className="flex-1 p-3 font-mono text-xs text-slate-300 overflow-auto whitespace-pre-wrap select-text leading-5">
+                <div
+                  className="flex-1 p-3 text-slate-300 overflow-auto whitespace-pre-wrap select-text leading-5"
+                  style={{
+                    fontFamily: getFontCss(terminalFont),
+                    fontSize: `${terminalFontSize}px`,
+                  }}
+                >
                   {previewContent || 'Log dosyası boş.'}
                 </div>
               </>

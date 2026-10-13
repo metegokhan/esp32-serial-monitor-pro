@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { PanelSession, SerialDeviceInfo, I18nLanguage } from './types';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { t } from './i18n';
+import { getFontCss } from './fontConfig';
 import {
   Play,
   Square,
@@ -33,6 +34,10 @@ interface LogPanelProps {
   globalHighlightWord: string;
   onWordClick: (word: string) => void;
   onNotification: (msg: string) => void;
+  terminalFont: string;
+  terminalFontSize: number;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
 }
 
 const COMMON_BAUDS = [115200, 921600, 460800, 230400, 115200, 748800, 57600, 19200, 9600];
@@ -52,12 +57,28 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   globalHighlightWord,
   onWordClick,
   onNotification,
+  terminalFont,
+  terminalFontSize,
+  onZoomIn,
+  onZoomOut,
 }) => {
   const [commandInput, setCommandInput] = useState('');
   const [eol, setEol] = useState('\r\n');
   const [isResizing, setIsResizing] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Zoom with Ctrl + Wheel
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        onZoomIn?.();
+      } else if (e.deltaY > 0) {
+        onZoomOut?.();
+      }
+    }
+  };
 
   // Editable Quick Commands state with persistence
   const [quickCommands, setQuickCommands] = useState<string[]>(() => {
@@ -570,7 +591,13 @@ export const LogPanel: React.FC<LogPanelProps> = ({
       {/* 3. Log Terminal Body with Gutter */}
       <div
         ref={logContainerRef}
-        className="flex-1 overflow-y-auto overflow-x-auto bg-[#0f111a] p-1 font-mono text-xs select-text focus:outline-none"
+        onWheel={handleWheel}
+        className="flex-1 overflow-y-auto overflow-x-auto bg-[#0f111a] p-1 select-text focus:outline-none"
+        style={{
+          fontFamily: getFontCss(terminalFont),
+          fontSize: `${terminalFontSize}px`,
+          lineHeight: `${Math.max(16, Math.round(terminalFontSize * 1.45))}px`,
+        }}
       >
         {displayedLines.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-600 text-xs italic">
@@ -603,7 +630,10 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                 {/* Gutter Line Number & Clickable Dot Marker */}
                 <div
                   onClick={() => handleGutterClick(originalIndex)}
-                  className="w-12 shrink-0 select-none text-right pr-3 font-mono text-[11px] text-slate-600 group-hover:text-slate-400 cursor-pointer flex items-center justify-end gap-1"
+                  className="w-12 shrink-0 select-none text-right pr-3 text-slate-600 group-hover:text-slate-400 cursor-pointer flex items-center justify-end gap-1"
+                  style={{
+                    fontSize: `${Math.max(9, terminalFontSize - 1)}px`,
+                  }}
                 >
                   {isPointA ? (
                     <span className="w-4 h-4 bg-emerald-500 text-slate-950 font-black rounded-full flex items-center justify-center text-[10px] shadow">

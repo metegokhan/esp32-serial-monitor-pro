@@ -63,6 +63,12 @@ export const TRANSLATIONS = {
     noArchives: 'Henüz arşivlenmiş oturum bulunmuyor.',
     confirmDelete: '"{name}" arşivi silinsin mi?',
     
+    // Font settings
+    fontFamily: 'Yazı Tipi',
+    fontSize: 'Yazı Boyutu',
+    decreaseFontSize: 'Yazı Boyutunu Küçült (Ctrl+-)',
+    increaseFontSize: 'Yazı Boyutunu Büyüt (Ctrl++)',
+    
     // Notifications
     connectedMsg: 'Bağlantı kuruldu: {port} @ {baud} baud',
     disconnectedMsg: 'Bağlantı kesildi: {port}',
@@ -131,6 +137,12 @@ export const TRANSLATIONS = {
     archiveFolder: 'Archive Folder',
     noArchives: 'No archived sessions found.',
     confirmDelete: 'Delete archive "{name}"?',
+    
+    // Font settings
+    fontFamily: 'Font Family',
+    fontSize: 'Font Size',
+    decreaseFontSize: 'Decrease Font Size (Ctrl+-)',
+    increaseFontSize: 'Increase Font Size (Ctrl++)',
     
     // Notifications
     connectedMsg: 'Connected: {port} @ {baud} baud',

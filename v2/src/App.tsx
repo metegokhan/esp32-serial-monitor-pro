@@ -18,7 +18,10 @@ import {
   Filter,
   Terminal,
   HelpCircle,
+  Type,
+  Minus,
 } from 'lucide-react';
+import { FONT_OPTIONS, FONT_SIZE_OPTIONS } from './fontConfig';
 
 const MAX_BUFFERED_LINES = 5000;
 
@@ -118,6 +121,59 @@ export function App() {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
+
+  // Terminal typography settings with persistence
+  const [terminalFont, setTerminalFont] = useState<string>(
+    () => localStorage.getItem('serial_terminal_font') || 'JetBrains Mono'
+  );
+  const [terminalFontSize, setTerminalFontSize] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('serial_terminal_font_size'));
+    return saved && saved >= 9 && saved <= 24 ? saved : 12;
+  });
+
+  const handleZoomIn = useCallback(() => {
+    setTerminalFontSize((prev) => {
+      const next = Math.min(24, prev + 1);
+      localStorage.setItem('serial_terminal_font_size', String(next));
+      return next;
+    });
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setTerminalFontSize((prev) => {
+      const next = Math.max(9, prev - 1);
+      localStorage.setItem('serial_terminal_font_size', String(next));
+      return next;
+    });
+  }, []);
+
+  const handleFontChange = (newFont: string) => {
+    setTerminalFont(newFont);
+    localStorage.setItem('serial_terminal_font', newFont);
+  };
+
+  const handleFontSizeChange = (newSize: number) => {
+    setTerminalFontSize(newSize);
+    localStorage.setItem('serial_terminal_font_size', String(newSize));
+  };
+
+  // Keyboard zoom shortcut (Ctrl + = / Ctrl + - / Ctrl + 0)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        handleZoomIn();
+      } else if (e.ctrlKey && (e.key === '-' || e.key === '_')) {
+        e.preventDefault();
+        handleZoomOut();
+      } else if (e.ctrlKey && e.key === '0') {
+        e.preventDefault();
+        handleFontSizeChange(12);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleZoomIn, handleZoomOut]);
 
   const showToast = useCallback((msg: string) => {
     if (toastTimeoutRef.current) {
@@ -532,6 +588,54 @@ export function App() {
             )}
           </div>
 
+          {/* Typography & Zoom Controls */}
+          <div className="flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] rounded-md px-2 py-1 shrink-0">
+            <Type className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <select
+              value={terminalFont}
+              onChange={(e) => handleFontChange(e.target.value)}
+              className="bg-transparent text-xs text-[#cdd6f4] outline-none border-none cursor-pointer max-w-[115px] truncate"
+              title={t('fontFamily', lang)}
+            >
+              {FONT_OPTIONS.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+
+            <div className="h-3.5 w-px bg-[#26283b] mx-0.5 shrink-0" />
+
+            <button
+              onClick={handleZoomOut}
+              title={t('decreaseFontSize', lang)}
+              className="p-0.5 text-[#6c7086] hover:text-white hover:bg-[#1e2030] rounded transition cursor-pointer shrink-0"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+
+            <select
+              value={terminalFontSize}
+              onChange={(e) => handleFontSizeChange(Number(e.target.value))}
+              className="bg-transparent text-[11px] font-mono font-bold text-cyan-300 outline-none border-none cursor-pointer px-0.5 shrink-0"
+              title={t('fontSize', lang)}
+            >
+              {FONT_SIZE_OPTIONS.map((sz) => (
+                <option key={sz} value={sz}>
+                  {sz}px
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={handleZoomIn}
+              title={t('increaseFontSize', lang)}
+              className="p-0.5 text-[#6c7086] hover:text-white hover:bg-[#1e2030] rounded transition cursor-pointer shrink-0"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+
           {/* Language Toggle */}
           <button
             onClick={handleToggleLang}
@@ -581,6 +685,10 @@ export function App() {
               globalHighlightWord={globalHighlightWord}
               onWordClick={handleWordClick}
               onNotification={showToast}
+              terminalFont={terminalFont}
+              terminalFontSize={terminalFontSize}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
             />
           ))
         )}
@@ -600,6 +708,8 @@ export function App() {
         onClose={() => setIsArchiveModalOpen(false)}
         lang={lang}
         onOpenAsReference={handleOpenArchiveAsReference}
+        terminalFont={terminalFont}
+        terminalFontSize={terminalFontSize}
       />
 
       {/* About & General Usage Modal */}

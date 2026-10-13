@@ -134,6 +134,8 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose, lang })
               <div><span className="text-cyan-400 font-bold">F5</span>: {isTr ? 'ESP32 Donanımsal Reset (EN)' : 'Hardware Reset (EN)'}</div>
               <div><span className="text-cyan-400 font-bold">F6</span>: {isTr ? 'ESP32 Bootloader Modu (IO0)' : 'Bootloader Mode (IO0)'}</div>
               <div><span className="text-cyan-400 font-bold">Shift + Scroll</span>: {isTr ? 'Paneller Arasında Yatay Gezinme' : 'Horizontal Panel Scroll'}</div>
+              <div><span className="text-cyan-400 font-bold">Ctrl + Scroll / +/-</span>: {isTr ? 'Yazı Boyutu (Zoom In/Out)' : 'Zoom Font In / Out'}</div>
+              <div><span className="text-cyan-400 font-bold">Ctrl + 0</span>: {isTr ? 'Yazı Boyutunu Sıfırla (12px)' : 'Reset Font Size (12px)'}</div>
               <div><span className="text-cyan-400 font-bold">Çift Tık (Komut)</span>: {isTr ? 'Hızlı Komut Düzenleme' : 'Edit Quick Command'}</div>
             </div>
           </div>
