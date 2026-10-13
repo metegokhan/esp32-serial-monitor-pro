@@ -56,4 +56,14 @@ export interface PanelSession {
   historyIndex: number;
 }
 
+export interface FilterPreset {
+  id: string;
+  name: string;
+  tags: string[];
+  isVariableMode?: boolean;
+  matchCase?: boolean;
+  isRegex?: boolean;
+  createdAt: number;
+}
+
 export type I18nLanguage = 'tr' | 'en';

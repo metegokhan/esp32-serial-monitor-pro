@@ -4,7 +4,8 @@ import { PanelSession, SerialDeviceInfo, I18nLanguage } from './types';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { t } from './i18n';
 import { getFontCss } from './fontConfig';
-import { isLineMatchingFilters, formatFilterDescription } from './filterUtils';
+import { isLineMatchingFilters, formatFilterDescription, getFirstMatchingFilterTerm } from './filterUtils';
+import { getTagThemeByTag } from './filterColors';
 import {
   Play,
   Square,
@@ -29,6 +30,7 @@ interface LogPanelProps {
   onClosePanel: (id: string) => void;
   onMakeReference: (id: string) => void;
   filterTerms: string[];
+  allFilterTags?: string[];
   filterMatchingOnly: boolean;
   matchCase: boolean;
   isRegex: boolean;
@@ -53,6 +55,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   onClosePanel,
   onMakeReference,
   filterTerms,
+  allFilterTags,
   filterMatchingOnly,
   matchCase,
   isRegex,
@@ -711,11 +714,15 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               globalHighlightWord.length > 0 &&
               text.toLowerCase().includes(globalHighlightWord.toLowerCase());
 
-            // Check if line matches filter when not hiding other lines
-            const isFilterHit =
-              filterTerms.length > 0 &&
-              !filterMatchingOnly &&
-              isLineMatchingFilters(text, filterTerms, matchCase, isRegex, isVariableMode);
+            // Check if line matches filter to get specific tag theme
+            const matchingTerm =
+              filterTerms.length > 0
+                ? getFirstMatchingFilterTerm(text, filterTerms, matchCase, isRegex, isVariableMode)
+                : null;
+
+            const tagTheme = matchingTerm
+              ? getTagThemeByTag(matchingTerm, allFilterTags || filterTerms)
+              : null;
 
             return (
               <div
@@ -725,8 +732,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                     ? 'bg-sky-500/15 border-l-2 border-sky-400'
                     : hasHighlightWord
                     ? 'bg-amber-500/10'
-                    : isFilterHit
-                    ? 'bg-cyan-500/10 border-l border-cyan-400/50'
+                    : tagTheme
+                    ? `${tagTheme.lineBgClass} ${tagTheme.lineBorderClass}`
                     : ''
                 }`}
               >
@@ -768,6 +775,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                     line={text}
                     highlightWord={globalHighlightWord}
                     filterTerms={filterTerms}
+                    allFilterTags={allFilterTags}
                     matchCase={matchCase}
                     onWordClick={onWordClick}
                   />

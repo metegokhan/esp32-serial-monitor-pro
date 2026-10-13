@@ -54,6 +54,46 @@ export function isLineMatchingFilters(
 }
 
 /**
+ * Returns the first filter term that matches the given line, or null if none match.
+ */
+export function getFirstMatchingFilterTerm(
+  line: string,
+  filterTerms: string[],
+  matchCase: boolean,
+  isRegex: boolean,
+  isVariableMode: boolean = false
+): string | null {
+  if (!filterTerms || filterTerms.length === 0) return null;
+
+  for (const term of filterTerms) {
+    const trimmed = term.trim();
+    if (!trimmed) continue;
+
+    if (isVariableMode || isVariableExpression(trimmed)) {
+      if (checkLineVariableExpression(line, trimmed, matchCase)) {
+        return term;
+      }
+      continue;
+    }
+
+    if (isRegex) {
+      try {
+        const regex = new RegExp(trimmed, matchCase ? '' : 'i');
+        if (regex.test(line)) return term;
+      } catch {
+        continue;
+      }
+    } else {
+      if (matchCase ? line.includes(trimmed) : line.toLowerCase().includes(trimmed.toLowerCase())) {
+        return term;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Formats a list of filter terms into a description string for copy and export headers.
  * e.g. "fps > 10" OR "sync = true"
  */

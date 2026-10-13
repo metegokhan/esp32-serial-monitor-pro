@@ -1,9 +1,11 @@
 import React, { memo } from 'react';
+import { getMatchingThemeForToken, TagColorTheme } from './filterColors';
 
 interface SyntaxHighlighterProps {
   line: string;
   highlightWord?: string;
   filterTerms?: string[];
+  allFilterTags?: string[];
   matchCase?: boolean;
   onWordClick: (word: string) => void;
 }
@@ -12,6 +14,7 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
   line,
   highlightWord,
   filterTerms,
+  allFilterTags,
   matchCase = false,
   onWordClick,
 }) => {
@@ -36,33 +39,21 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
           return <span key={index}>{token}</span>;
         }
 
-        const isFilterMatch =
-          filterTerms &&
-          filterTerms.length > 0 &&
-          filterTerms.some((ft) => {
-            const trimmed = ft.trim();
-            if (!trimmed) return false;
-            // Direct substring match for simple words
-            if (matchCase ? token.includes(trimmed) : token.toLowerCase().includes(trimmed.toLowerCase())) {
-              return true;
-            }
-            // If ft is an expression, check if token is one of the variable names
-            const exprWords = trimmed.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
-            if (exprWords) {
-              const RESERVED = new Set(['ve', 'and', 'yada', 'veya', 'or', 'not', 'true', 'false', 'ikincisi', 'ikinci', 'ise', 'x']);
-              return exprWords.some((w) => {
-                if (RESERVED.has(w.toLowerCase())) return false;
-                return matchCase ? token === w : token.toLowerCase() === w.toLowerCase();
-              });
-            }
-            return false;
-          });
+        const isClickedWord =
+          highlightWord &&
+          highlightWord.length > 0 &&
+          token.toLowerCase() === highlightWord.toLowerCase();
 
-        const isHighlighted =
-          (highlightWord &&
-            highlightWord.length > 0 &&
-            token.toLowerCase() === highlightWord.toLowerCase()) ||
-          Boolean(isFilterMatch);
+        const matchingTagTheme: TagColorTheme | null =
+          filterTerms && filterTerms.length > 0
+            ? getMatchingThemeForToken(token, filterTerms, allFilterTags || filterTerms, matchCase)
+            : null;
+
+        const highlightClass = isClickedWord
+          ? 'bg-amber-400/30 text-amber-200 ring-1 ring-amber-400 font-bold px-0.5 rounded'
+          : matchingTagTheme
+          ? `font-bold px-0.5 rounded ${matchingTagTheme.tokenClass}`
+          : '';
 
         // 1. Hex address / value: 0x...
         if (/^0x[0-9a-fA-F]+$/i.test(token)) {
@@ -71,8 +62,8 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
               key={index}
               onClick={(e) => { e.stopPropagation(); onWordClick(token); }}
               className={`cursor-pointer transition-colors ${
-                isHighlighted
-                  ? 'bg-amber-400/30 text-amber-200 ring-1 ring-amber-400 font-bold px-0.5 rounded'
+                highlightClass
+                  ? highlightClass
                   : 'text-cyan-400 font-semibold hover:underline'
               }`}
             >
@@ -88,8 +79,8 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
               key={index}
               onClick={(e) => { e.stopPropagation(); onWordClick(token); }}
               className={`cursor-pointer transition-colors ${
-                isHighlighted
-                  ? 'bg-amber-400/30 text-amber-200 ring-1 ring-amber-400 font-bold px-0.5 rounded'
+                highlightClass
+                  ? highlightClass
                   : 'text-amber-300 font-medium hover:underline'
               }`}
             >
@@ -130,8 +121,8 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
               key={index}
               onClick={(e) => { e.stopPropagation(); onWordClick(token); }}
               className={`cursor-pointer transition-colors ${
-                isHighlighted
-                  ? 'bg-amber-400/30 text-amber-200 ring-1 ring-amber-400 font-bold px-0.5 rounded'
+                highlightClass
+                  ? highlightClass
                   : 'text-slate-200 hover:text-cyan-300 hover:underline'
               }`}
             >

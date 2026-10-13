@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage } from './types';
+import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage, FilterPreset } from './types';
 import { LogPanel } from './LogPanel';
 import { ArchiveModal } from './ArchiveModal';
 import { AboutModal } from './AboutModal';
+import { FilterPresetsModal } from './FilterPresetsModal';
 import { t } from './i18n';
 import { isLineMatchingFilters, formatFilterDescription } from './filterUtils';
+import { getTagThemeByIndex } from './filterColors';
 import {
   Plus,
   FolderOpen,
@@ -21,6 +23,7 @@ import {
   HelpCircle,
   Type,
   Minus,
+  Bookmark,
 } from 'lucide-react';
 import { FONT_OPTIONS, FONT_SIZE_OPTIONS } from './fontConfig';
 
@@ -126,6 +129,8 @@ export function App() {
   const [triggerKeyword, setTriggerKeyword] = useState('');
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isFilterPresetsModalOpen, setIsFilterPresetsModalOpen] = useState(false);
+  const [hoveredTag, setHoveredTag] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
 
@@ -387,6 +392,37 @@ export function App() {
     return terms;
   }, [filterTags, searchTagInput]);
 
+  // When hovering over a specific tag pill, isolate and show ONLY that tag across panels
+  const effectiveFilterTerms = React.useMemo(() => {
+    if (hoveredTag) return [hoveredTag];
+    return activeFilterTerms;
+  }, [hoveredTag, activeFilterTerms]);
+
+  const effectiveFilterMatchingOnly = hoveredTag ? true : filterMatchingOnly;
+
+  const handleApplyPreset = (preset: FilterPreset, append: boolean) => {
+    if (append) {
+      setFilterTags((prev) => {
+        const next = [...prev];
+        preset.tags.forEach((t) => {
+          if (!next.includes(t)) next.push(t);
+        });
+        return next;
+      });
+    } else {
+      setFilterTags(preset.tags);
+      if (preset.isVariableMode !== undefined) setIsVariableMode(preset.isVariableMode);
+      if (preset.matchCase !== undefined) setMatchCase(preset.matchCase);
+      if (preset.isRegex !== undefined) setIsRegex(preset.isRegex);
+    }
+    setFilterMatchingOnly(true);
+    showToast(
+      lang === 'tr'
+        ? `"${preset.name}" şablonu ${append ? 'eklendi' : 'yüklendi'}.`
+        : `${append ? 'Appended' : 'Applied'} "${preset.name}" preset.`
+    );
+  };
+
   const handleAddTag = (tagText: string) => {
     const trimmed = tagText.trim();
     if (!trimmed) return;
@@ -459,17 +495,17 @@ export function App() {
 
   // Compute total matched count across panels
   const totalMatchesCount = React.useMemo(() => {
-    if (activeFilterTerms.length === 0) return 0;
+    if (effectiveFilterTerms.length === 0) return 0;
     let count = 0;
     panels.forEach((p) => {
       p.lines.forEach((line) => {
-        if (isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex, isVariableMode)) {
+        if (isLineMatchingFilters(line, effectiveFilterTerms, matchCase, isRegex, isVariableMode)) {
           count++;
         }
       });
     });
     return count;
-  }, [panels, activeFilterTerms, matchCase, isRegex, isVariableMode]);
+  }, [panels, effectiveFilterTerms, matchCase, isRegex, isVariableMode]);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0d0e15] text-[#cdd6f4] select-none font-sans overflow-hidden">
@@ -515,6 +551,16 @@ export function App() {
             <span>{t('archives', lang)}</span>
           </button>
 
+          {/* Saved Filter Presets */}
+          <button
+            onClick={() => setIsFilterPresetsModalOpen(true)}
+            title={t('filterPresetsTip', lang)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-white hover:bg-[#282a3e] border border-[#313244] transition cursor-pointer whitespace-nowrap"
+          >
+            <Bookmark className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
+            <span>{t('filterPresets', lang)}</span>
+          </button>
+
           {/* Clear All */}
           <button
             onClick={handleClearAll}
@@ -526,29 +572,60 @@ export function App() {
           </button>
         </div>
 
-        {/* Center: Global Search & Real-time Cross-Panel Filtering */}
         {/* Center: Global Multi-Tag Search & Real-time Cross-Panel Filtering (OR logic) */}
         <div className="flex-1 max-w-2xl flex items-center gap-1.5 bg-[#0d0e15] border border-[#2d3047] focus-within:border-cyan-500/70 rounded-md px-2.5 py-1 transition shadow-inner min-w-[280px]">
           <Search className="w-4 h-4 text-[#6c7086] shrink-0" />
 
           {/* Tags + Input Flex Container */}
           <div className="flex-1 flex items-center gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5">
-            {filterTags.map((tag) => (
-              <span
-                key={tag}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono shrink-0 select-none animate-in fade-in zoom-in-95 duration-100"
-              >
-                <span className="truncate max-w-[120px]" title={tag}>{tag}</span>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveTag(tag)}
-                  className="text-cyan-400 hover:text-white hover:bg-cyan-800/50 rounded w-3.5 h-3.5 flex items-center justify-center text-[10px] cursor-pointer"
-                  title={lang === 'tr' ? 'Filtreyi kaldır' : 'Remove filter'}
+            {filterTags.map((tag, idx) => {
+              const theme = getTagThemeByIndex(idx);
+              const isHovered = hoveredTag === tag;
+              return (
+                <span
+                  key={tag}
+                  onMouseEnter={() => setHoveredTag(tag)}
+                  onMouseLeave={() => setHoveredTag(null)}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono shrink-0 select-none cursor-pointer transition-all border ${theme.pillClass} ${
+                    isHovered
+                      ? 'ring-2 ring-white/90 scale-105 shadow-md brightness-125 z-10'
+                      : hoveredTag
+                      ? 'opacity-35 scale-95'
+                      : theme.pillHoverClass
+                  }`}
+                  title={
+                    lang === 'tr'
+                      ? `Üzerinde dur: Sadece "${tag}" göster (Önizleme)\nKaldırmak için ✕ tıklayın`
+                      : `Hover: Show only "${tag}" (Peek)\nClick ✕ to remove`
+                  }
                 >
-                  ✕
-                </button>
+                  <span
+                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: 'currentColor' }}
+                  />
+                  <span className="truncate max-w-[120px]">{tag}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveTag(tag);
+                      if (hoveredTag === tag) setHoveredTag(null);
+                    }}
+                    className={`rounded w-3.5 h-3.5 flex items-center justify-center text-[10px] cursor-pointer ${theme.closeBtnClass}`}
+                    title={lang === 'tr' ? 'Filtreyi kaldır' : 'Remove filter'}
+                  >
+                    ✕
+                  </button>
+                </span>
+              );
+            })}
+
+            {/* Hover Peek Indicator */}
+            {hoveredTag && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/50 text-[10px] font-mono animate-pulse shrink-0">
+                👁 {t('peekMode', lang)}: {hoveredTag}
               </span>
-            ))}
+            )}
 
             <input
               type="text"
@@ -665,6 +742,16 @@ export function App() {
               <Copy className="w-3.5 h-3.5" />
             </button>
           )}
+
+          {/* Quick Presets Icon */}
+          <button
+            type="button"
+            onClick={() => setIsFilterPresetsModalOpen(true)}
+            title={t('filterPresetsTip', lang)}
+            className="p-1 rounded-md text-amber-400/80 hover:text-amber-300 hover:bg-amber-950/30 transition cursor-pointer shrink-0"
+          >
+            <Bookmark className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         {/* Right: Trigger Keyword & Language Switcher */}
@@ -774,8 +861,9 @@ export function App() {
               onUpdatePanel={handleUpdatePanel}
               onClosePanel={handleClosePanel}
               onMakeReference={handleMakeReference}
-              filterTerms={activeFilterTerms}
-              filterMatchingOnly={filterMatchingOnly}
+              filterTerms={effectiveFilterTerms}
+              allFilterTags={filterTags}
+              filterMatchingOnly={effectiveFilterMatchingOnly}
               matchCase={matchCase}
               isRegex={isRegex}
               isVariableMode={isVariableMode}
@@ -807,6 +895,19 @@ export function App() {
         onOpenAsReference={handleOpenArchiveAsReference}
         terminalFont={terminalFont}
         terminalFontSize={terminalFontSize}
+      />
+
+      {/* Filter Presets Modal Dialog */}
+      <FilterPresetsModal
+        isOpen={isFilterPresetsModalOpen}
+        onClose={() => setIsFilterPresetsModalOpen(false)}
+        lang={lang}
+        currentTags={activeFilterTerms}
+        isVariableMode={isVariableMode}
+        matchCase={matchCase}
+        isRegex={isRegex}
+        onApplyPreset={handleApplyPreset}
+        onNotification={showToast}
       />
 
       {/* About & General Usage Modal */}
