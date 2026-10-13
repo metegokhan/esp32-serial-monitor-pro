@@ -40,7 +40,10 @@ const DEMO_LOGS_1 = [
   "[12:00:06.010] [DATA] Telemetry #4: temp=24.6C, humidity=48%, pressure=1013hPa",
   "[12:00:07.010] [DATA] Telemetry #5: temp=24.8C, humidity=47%, pressure=1013hPa",
   "[12:00:08.010] [DATA] Telemetry #6: temp=25.0C, humidity=46%, pressure=1013hPa",
-  "[12:00:09.010] [INFO] Periodic memory check: free_heap=184320 bytes, min_free=180100"
+  "[12:00:09.010] [INFO] Periodic memory check: free_heap=184320 bytes, min_free=180100",
+  "[12:00:10.010] [vid] fps : 15 sync : true drop  = 3 audio= 123",
+  "[12:00:11.010] [vid] fps : 16 sync : true drop  = 3 audio= 121",
+  "[12:00:12.010] [vid] fps : 10 sync : false drop  = 3 audio= 120"
 ];
 
 const DEMO_LOGS_2 = [
@@ -117,6 +120,7 @@ export function App() {
   const [filterMatchingOnly, setFilterMatchingOnly] = useState(false);
   const [matchCase, setMatchCase] = useState(false);
   const [isRegex, setIsRegex] = useState(false);
+  const [isVariableMode, setIsVariableMode] = useState(false);
   const [globalHighlightWord, setGlobalHighlightWord] = useState('');
   const [triggerKeyword, setTriggerKeyword] = useState('');
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
@@ -431,7 +435,7 @@ export function App() {
 
     panels.forEach((p) => {
       const panelMatches = p.lines.filter((line) =>
-        isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex)
+        isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex, isVariableMode)
       );
 
       if (panelMatches.length > 0) {
@@ -458,13 +462,13 @@ export function App() {
     let count = 0;
     panels.forEach((p) => {
       p.lines.forEach((line) => {
-        if (isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex)) {
+        if (isLineMatchingFilters(line, activeFilterTerms, matchCase, isRegex, isVariableMode)) {
           count++;
         }
       });
     });
     return count;
-  }, [panels, activeFilterTerms, matchCase, isRegex]);
+  }, [panels, activeFilterTerms, matchCase, isRegex, isVariableMode]);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0d0e15] text-[#cdd6f4] select-none font-sans overflow-hidden">
@@ -552,7 +556,9 @@ export function App() {
               onKeyDown={handleSearchInputKeyDown}
               placeholder={
                 filterTags.length === 0
-                  ? t('searchPlaceholder', lang)
+                  ? isVariableMode
+                    ? t('variableSearchPlaceholder', lang)
+                    : t('searchPlaceholder', lang)
                   : (lang === 'tr' ? '+ etiket ekle (Enter)...' : '+ add tag (Enter)...')
               }
               className="flex-1 min-w-[100px] bg-transparent text-xs text-[#cdd6f4] placeholder-[#45475a] outline-none font-mono"
@@ -631,6 +637,20 @@ export function App() {
             }`}
           >
             .*
+          </button>
+
+          {/* Variable / Expression Mode */}
+          <button
+            type="button"
+            onClick={() => setIsVariableMode(!isVariableMode)}
+            title={t('variableModeTip', lang)}
+            className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold transition cursor-pointer shrink-0 ${
+              isVariableMode
+                ? 'bg-purple-500/25 text-purple-300 border border-purple-500/50 shadow-sm shadow-purple-500/20'
+                : 'text-[#6c7086] hover:text-[#a6adc8]'
+            }`}
+          >
+            {'{x}'}
           </button>
 
           {/* Copy Matches */}
@@ -757,6 +777,7 @@ export function App() {
               filterMatchingOnly={filterMatchingOnly}
               matchCase={matchCase}
               isRegex={isRegex}
+              isVariableMode={isVariableMode}
               globalHighlightWord={globalHighlightWord}
               onWordClick={handleWordClick}
               onNotification={showToast}

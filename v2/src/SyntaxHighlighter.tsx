@@ -42,9 +42,20 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
           filterTerms.some((ft) => {
             const trimmed = ft.trim();
             if (!trimmed) return false;
-            return matchCase
-              ? token.includes(trimmed)
-              : token.toLowerCase().includes(trimmed.toLowerCase());
+            // Direct substring match for simple words
+            if (matchCase ? token.includes(trimmed) : token.toLowerCase().includes(trimmed.toLowerCase())) {
+              return true;
+            }
+            // If ft is an expression, check if token is one of the variable names
+            const exprWords = trimmed.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
+            if (exprWords) {
+              const RESERVED = new Set(['ve', 'and', 'yada', 'veya', 'or', 'not', 'true', 'false', 'ikincisi', 'ikinci', 'ise', 'x']);
+              return exprWords.some((w) => {
+                if (RESERVED.has(w.toLowerCase())) return false;
+                return matchCase ? token === w : token.toLowerCase() === w.toLowerCase();
+              });
+            }
+            return false;
           });
 
         const isHighlighted =

@@ -32,6 +32,7 @@ interface LogPanelProps {
   filterMatchingOnly: boolean;
   matchCase: boolean;
   isRegex: boolean;
+  isVariableMode?: boolean;
   globalHighlightWord: string;
   onWordClick: (word: string) => void;
   onNotification: (msg: string) => void;
@@ -55,6 +56,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   filterMatchingOnly,
   matchCase,
   isRegex,
+  isVariableMode = false,
   globalHighlightWord,
   onWordClick,
   onNotification,
@@ -415,8 +417,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
 
     return panel.lines
       .map((text, originalIndex) => ({ text, originalIndex }))
-      .filter(({ text }) => isLineMatchingFilters(text, filterTerms, matchCase, isRegex));
-  }, [panel.lines, filterTerms, filterMatchingOnly, matchCase, isRegex]);
+      .filter(({ text }) => isLineMatchingFilters(text, filterTerms, matchCase, isRegex, isVariableMode));
+  }, [panel.lines, filterTerms, filterMatchingOnly, matchCase, isRegex, isVariableMode]);
 
   // Width Resize Handler
   const handleMouseDownResize = (e: React.MouseEvent) => {
@@ -713,7 +715,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             const isFilterHit =
               filterTerms.length > 0 &&
               !filterMatchingOnly &&
-              isLineMatchingFilters(text, filterTerms, matchCase, isRegex);
+              isLineMatchingFilters(text, filterTerms, matchCase, isRegex, isVariableMode);
 
             return (
               <div
