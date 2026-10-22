@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Copy,
+  Check,
+  Sparkles,
   BookOpen,
   Search,
   Radio,
@@ -36,6 +38,10 @@ export const AiActivityModal: React.FC<AiActivityModalProps> = ({
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'success' | 'error'>('all');
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [copiedIp, setCopiedIp] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [promptLang, setPromptLang] = useState<'tr' | 'en'>(lang);
+  const [showPromptBanner, setShowPromptBanner] = useState(true);
 
   if (!isOpen) return null;
 
@@ -57,24 +63,135 @@ export const AiActivityModal: React.FC<AiActivityModalProps> = ({
     onNotification(lang === 'tr' ? './smp panoya kopyalandı.' : './smp copied to clipboard.');
   };
 
+  const handleCopyIp = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    navigator.clipboard.writeText('http://127.0.0.1:4567');
+    setCopiedIp(true);
+    setTimeout(() => setCopiedIp(false), 2000);
+    onNotification(
+      lang === 'tr'
+        ? '📋 API adresi panoya kopyalandı: http://127.0.0.1:4567'
+        : '📋 API URL copied to clipboard: http://127.0.0.1:4567'
+    );
+  };
+
+  const getAiPrompt = (l: 'tr' | 'en') => {
+    if (l === 'tr') {
+      return `Sen Serial Monitor Pro'ya bağlı çalışan bir gömülü sistemler AI ajanısın.
+ESP32 / UART donanım loglarını izlemek, donanımı yönetmek ve komut çalıştırmak için yerel API ve CLI aracını kullanacaksın.
+
+📡 BAĞLANTI & SKILL KAYNAĞI:
+- API Adresi: http://127.0.0.1:4567
+- CLI Aracı: ./smp (veya curl ile REST API)
+- Tam Yetenek & Skill Rehberi: \`./smp help\` veya \`curl -s http://127.0.0.1:4567/api/skill\`
+
+⚡ HIZLI BAŞLANGIÇ KOMUTLARI:
+1. Donanıma Otomatik Bağlan: \`./smp connect auto\` (takılı ESP32/UART cihazını otomatik bulur ve bağlanır)
+2. İnteraktif Komut & Yanıt: \`./smp exec "<komut>"\` (komutu cihaza yollar ve cihazın yanıtını doğrudan döndürür)
+3. Canlı Logları Oku: \`./smp logs --tail 50\` veya \`./smp logs --filter "HEAP"\`
+4. Betik / Çok Satırlı Kod Yolla: \`./smp send -f script.py --delay 50\`
+5. Yerel Kabuk Komutları: \`./smp shell "<komut>"\` (Linux: bash, Windows: powershell)
+6. Teşhis Satırını Pinle/Etiketle: \`./smp pin last "Kritik Hata"\` veya \`./smp pin --preset 1\`
+7. Donanım & Oturum Durumu: \`./smp status\`
+8. Donanımsal Reset: \`./smp reset\` | Bootloader: \`./smp boot\`
+
+Çalışmaya başlarken önce \`./smp status\` ve \`./smp help\` ile mevcut donanım ortamını doğrula.`;
+    }
+    return `You are an embedded systems AI agent working with Serial Monitor Pro.
+You can monitor ESP32/UART hardware logs, inspect diagnostics, and execute commands using the local API and CLI.
+
+📡 CONNECTION & SKILL SOURCE:
+- API Base: http://127.0.0.1:4567
+- CLI Tool: ./smp (or curl REST endpoints)
+- Full Skill Guide: \`./smp help\` or \`curl -s http://127.0.0.1:4567/api/skill\`
+
+⚡ QUICK START COMMANDS:
+1. Auto-Connect to Device: \`./smp connect auto\` (auto-detects plugged ESP32/UART hardware)
+2. Interactive Exec: \`./smp exec "<command>"\` (sends command and immediately returns device response lines)
+3. Read Live Logs: \`./smp logs --tail 50\` or \`./smp logs --filter "HEAP"\`
+4. Send Script / Multiline: \`./smp send -f script.py --delay 50\`
+5. Host Shell Commands: \`./smp shell "<cmd>"\` (Linux: bash, Windows: powershell)
+6. Pin/Tag Line: \`./smp pin last "Critical error"\` or \`./smp pin --preset 1\`
+7. Inspect Status: \`./smp status\`
+8. Hardware Reset: \`./smp reset\` | Bootloader: \`./smp boot\`
+
+When starting, inspect \`./smp status\` and \`./smp help\` to verify connected hardware and available capabilities.`;
+  };
+
+  const handleCopyAiPrompt = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const prompt = getAiPrompt(promptLang);
+    navigator.clipboard.writeText(prompt);
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2500);
+    onNotification(
+      lang === 'tr'
+        ? '🤖 AI Ön Promptu panoya kopyalandı! AI modelinize (Claude, ChatGPT, Cursor vb.) yapıştırabilirsiniz.'
+        : '🤖 AI Agent Prompt copied! Paste it to your AI model (Claude, ChatGPT, Cursor, etc.).'
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
       <div className="bg-[#141622] border border-[#2d3047] rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-[#25283b] flex items-center justify-between bg-[#10121d]">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-inner">
-              <Bot className="w-4 h-4" />
-            </div>
+            {/* Blinking/pulsing Robot Avatar Button - Click to Copy AI Bootstrap Prompt */}
+            <button
+              onClick={handleCopyAiPrompt}
+              title={
+                lang === 'tr'
+                  ? '🤖 Tıkla: AI Ön Promptunu Kopyala (AI Ajanına iletmek için)'
+                  : '🤖 Click: Copy AI Agent Prompt (to paste into your AI model)'
+              }
+              className="relative group p-0.5 rounded-xl transition cursor-pointer hover:scale-105 active:scale-95"
+            >
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500/25 to-purple-600/35 text-indigo-300 flex items-center justify-center border border-indigo-500/40 shadow-[0_0_15px_rgba(99,102,241,0.35)] group-hover:border-indigo-400 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.6)] transition relative overflow-hidden">
+                {/* Glowing pulsing halo effect */}
+                <span className="absolute inset-0 bg-indigo-500/20 rounded-xl animate-pulse" />
+                
+                {copiedPrompt ? (
+                  <Check className="w-5 h-5 text-emerald-400 relative z-10 animate-in zoom-in-50 duration-150" />
+                ) : (
+                  <Bot className="w-5 h-5 text-indigo-300 animate-pulse relative z-10 group-hover:text-white transition" />
+                )}
+
+                {/* Blinking ping indicator badge */}
+                <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5 z-10">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500" />
+                </span>
+              </div>
+            </button>
+
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-white tracking-wide">
                   {lang === 'tr' ? 'AI Agent & Terminal Komut Konsolu' : 'AI Agent & Terminal Command Console'}
                 </h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                {/* Clickable IP Address Badge with Copy feedback */}
+                <button
+                  onClick={handleCopyIp}
+                  title={
+                    lang === 'tr'
+                      ? 'Tıkla ve API / IP adresini kopyala (http://127.0.0.1:4567)'
+                      : 'Click to copy API / IP address (http://127.0.0.1:4567)'
+                  }
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1.5 transition cursor-pointer select-none ${
+                    copiedIp
+                      ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400 shadow-sm shadow-emerald-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30 hover:border-emerald-400 hover:text-white'
+                  }`}
+                >
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>http://127.0.0.1:4567</span>
-                </span>
+                  <span className="font-mono">http://127.0.0.1:4567</span>
+                  {copiedIp ? (
+                    <Check className="w-3 h-3 text-emerald-300 animate-in zoom-in-50" />
+                  ) : (
+                    <Copy className="w-3 h-3 opacity-70 group-hover:opacity-100" />
+                  )}
+                </button>
               </div>
               <p className="text-[11px] text-[#6c7086]">
                 {lang === 'tr'
@@ -99,6 +216,77 @@ export const AiActivityModal: React.FC<AiActivityModalProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* AI Bootstrap Prompt Banner */}
+        <div className="px-5 py-2.5 bg-gradient-to-r from-indigo-950/40 via-[#121422] to-purple-950/30 border-b border-[#25283b] flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-indigo-300 shrink-0">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                <span>{lang === 'tr' ? 'AI Ön Promptu (Sistem İstemi)' : 'AI Bootstrap Prompt (System Prompt)'}</span>
+              </span>
+              <span className="text-[10px] text-[#6c7086] truncate hidden md:inline">
+                {lang === 'tr'
+                  ? 'Yanıp sönen robot ikonuna veya sağdaki butona tıklayarak kopyalayın; Claude, ChatGPT, Cursor vb. modele yapıştırın'
+                  : 'Click the pulsing robot icon or button to copy; paste into Claude, ChatGPT, Cursor, etc.'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Language toggle TR / EN */}
+              <div className="flex items-center bg-[#090a12] p-0.5 rounded border border-[#2d3047] text-[10px]">
+                <button
+                  onClick={() => setPromptLang('tr')}
+                  className={`px-1.5 py-0.5 rounded transition cursor-pointer ${promptLang === 'tr' ? 'bg-indigo-600 text-white font-bold' : 'text-[#898da0] hover:text-white'}`}
+                >
+                  TR
+                </button>
+                <button
+                  onClick={() => setPromptLang('en')}
+                  className={`px-1.5 py-0.5 rounded transition cursor-pointer ${promptLang === 'en' ? 'bg-indigo-600 text-white font-bold' : 'text-[#898da0] hover:text-white'}`}
+                >
+                  EN
+                </button>
+              </div>
+
+              {/* Copy prompt button */}
+              <button
+                onClick={handleCopyAiPrompt}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+                  copiedPrompt
+                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-500/40'
+                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30'
+                }`}
+              >
+                {copiedPrompt ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{lang === 'tr' ? 'Kopyalandı!' : 'Copied!'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>{lang === 'tr' ? 'Promptu Kopyala' : 'Copy Prompt'}</span>
+                  </>
+                )}
+              </button>
+
+              {/* Toggle preview */}
+              <button
+                onClick={() => setShowPromptBanner(!showPromptBanner)}
+                className="text-[11px] text-[#898da0] hover:text-white underline cursor-pointer ml-1"
+              >
+                {showPromptBanner ? (lang === 'tr' ? 'Gizle' : 'Hide') : (lang === 'tr' ? 'Önizle' : 'Preview')}
+              </button>
+            </div>
+          </div>
+
+          {showPromptBanner && (
+            <div className="relative group bg-[#090a12] border border-[#272b43] rounded-lg p-2.5 text-[11px] font-mono text-[#a6adc8] max-h-32 overflow-y-auto whitespace-pre-wrap leading-relaxed select-all">
+              {getAiPrompt(promptLang)}
+            </div>
+          )}
         </div>
 
         {/* Content Body */}

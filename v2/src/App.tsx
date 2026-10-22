@@ -1177,8 +1177,8 @@ export function App() {
             onClick={() => setIsAiModalOpen(true)}
             title={
               lang === 'tr'
-                ? `🤖 AI Model Terminal & Denetim Konsolu (${aiLogs.length} işlem, ${connectedAiModels.length} bağlı model)`
-                : `🤖 AI Model Terminal & Audit Console (${aiLogs.length} logs, ${connectedAiModels.length} active agents)`
+                ? `🤖 AI Model Terminal & Denetim Konsolu (${aiLogs.length} işlem, ${connectedAiModels.length} bağlı model)\n• Tıkla: AI Ön Promptunu ve IP Adresini (http://127.0.0.1:4567) Kopyala`
+                : `🤖 AI Model Terminal & Audit Console (${aiLogs.length} logs, ${connectedAiModels.length} active agents)\n• Click: Copy AI Agent Prompt & IP Address (http://127.0.0.1:4567)`
             }
             className={`p-1.5 rounded-md border transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
               connectedAiModels.length > 0
@@ -1191,7 +1191,7 @@ export function App() {
             {connectedAiModels.length > 0 ? (
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             ) : (
-              <Bot className="w-4 h-4 text-purple-400" />
+              <Bot className="w-4 h-4 text-purple-400 animate-pulse" />
             )}
             <span className="text-[10px] font-mono font-bold text-purple-300">
               {connectedAiModels.length > 0 ? `${connectedAiModels.length} AI` : 'AI'}

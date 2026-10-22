@@ -135,6 +135,11 @@ export const TRANSLATIONS = {
     aiConsole: 'AI Model Denetim Konsolu',
     aiSkill: 'AI Model Beceri & Komut Rehberi',
     aiCommandsLogged: 'AI model komutları burada anlık loglanır',
+    aiBootstrapPrompt: 'AI Ön Promptu (Sistem İstemi)',
+    copyAiPrompt: 'Promptu Kopyala',
+    aiPromptCopied: 'AI Ön Promptu panoya kopyalandı!',
+    copyApiUrl: 'IP / API Adresini Kopyala',
+    apiUrlCopied: 'API adresi kopyalandı: http://127.0.0.1:4567',
 
     // Notifications
     connectedMsg: 'Bağlantı kuruldu: {port} @ {baud} baud',
@@ -276,6 +281,11 @@ export const TRANSLATIONS = {
     aiConsole: 'AI Model Audit Console',
     aiSkill: 'AI Model Skill & Command Guide',
     aiCommandsLogged: 'AI model terminal commands are logged here in real-time',
+    aiBootstrapPrompt: 'AI Agent Bootstrap Prompt',
+    copyAiPrompt: 'Copy Prompt',
+    aiPromptCopied: 'AI Agent Prompt copied to clipboard!',
+    copyApiUrl: 'Copy IP / API Address',
+    apiUrlCopied: 'API address copied: http://127.0.0.1:4567',
 
     // Notifications
     connectedMsg: 'Connected: {port} @ {baud} baud',
