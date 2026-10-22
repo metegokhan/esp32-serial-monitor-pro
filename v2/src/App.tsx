@@ -1,14 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage, FilterPreset } from './types';
+import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage, FilterPreset, AutoNamingConfig, TriggerActionsConfig, AiCommandLog, LogPin, AiModelClient } from './types';
 import { LogPanel } from './LogPanel';
 import { ArchiveModal } from './ArchiveModal';
 import { AboutModal } from './AboutModal';
 import { FilterPresetsModal } from './FilterPresetsModal';
+import { GoogleDriveModal } from './GoogleDriveModal';
+import { TriggerSettingsModal } from './TriggerSettingsModal';
+import { AiActivityModal } from './AiActivityModal';
 import { t } from './i18n';
 import { isLineMatchingFilters, formatFilterDescription } from './filterUtils';
 import { getTagThemeByIndex } from './filterColors';
+import { evaluateAutoNaming } from './autoNaming';
+import { loadTriggerConfig, saveTriggerConfig, executeTriggerActions } from './triggerActions';
 import {
   Plus,
   FolderOpen,
@@ -24,10 +29,10 @@ import {
   Minus,
   Bookmark,
   Target,
+  Cloud,
+  Bot,
 } from 'lucide-react';
 import { FONT_OPTIONS } from './fontConfig';
-
-const MAX_BUFFERED_LINES = 5000;
 
 const DEMO_LOGS_1 = [
   "[12:00:01.010] [INFO] System initialized. Chip: ESP32-D0WDQ6 (revision 1)",
@@ -85,7 +90,8 @@ function createSession(
   port: string = '',
   isReference: boolean = false,
   initialLines: string[] = [],
-  title?: string
+  title?: string,
+  defaultAutoCloseSec?: number
 ): PanelSession {
   const id = `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   return {
@@ -95,6 +101,8 @@ function createSession(
     baudRate: 115200,
     isConnected: false,
     isReconnecting: false,
+    autoReconnect: true,
+    reconnectAttempts: 0,
     resetOnConnect: false,
     autoScroll: true,
     showTimestamps: false,
@@ -108,6 +116,13 @@ function createSession(
     width: 600,
     commandHistory: [],
     historyIndex: -1,
+    autoNamingRule: 'esp-rom:',
+    autoNamingEnabled: true,
+    isArmed: false,
+    wasTriggered: false,
+    autoCloseEnabled: false,
+    autoCloseTimeoutSec: defaultAutoCloseSec || 30,
+    pins: [],
   };
 }
 
@@ -130,11 +145,47 @@ export function App() {
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isFilterPresetsModalOpen, setIsFilterPresetsModalOpen] = useState(false);
+  const [isGDriveModalOpen, setIsGDriveModalOpen] = useState(false);
+  const [isTriggerSettingsModalOpen, setIsTriggerSettingsModalOpen] = useState(false);
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [aiLogs, setAiLogs] = useState<AiCommandLog[]>(() => {
+    try {
+      const saved = localStorage.getItem('esp32_ai_command_logs');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const handleClearAiLogs = () => {
+    setAiLogs([]);
+    localStorage.removeItem('esp32_ai_command_logs');
+  };
+  const [connectedAiModels, setConnectedAiModels] = useState<AiModelClient[]>([]);
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
   const fontMenuRef = useRef<HTMLDivElement>(null);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
+
+  // Max log capacity setting
+  const [maxLogCapacity, setMaxLogCapacity] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('serial_max_log_capacity'));
+    return saved && saved >= 100 ? saved : 5000;
+  });
+
+  // Trigger actions configuration
+  const [triggerConfig, setTriggerConfig] = useState<TriggerActionsConfig>(() => loadTriggerConfig());
+
+  // Auto naming configuration
+  const [autoNaming, setAutoNaming] = useState<AutoNamingConfig>(() => {
+    try {
+      const saved = localStorage.getItem('serial_auto_naming_config');
+      return saved ? JSON.parse(saved) : { enabled: true, rule: 'esp-rom:' };
+    } catch {
+      return { enabled: true, rule: 'esp-rom:' };
+    }
+  });
 
   // Terminal typography settings with persistence
   const [terminalFont, setTerminalFont] = useState<string>(
@@ -144,6 +195,65 @@ export function App() {
     const saved = Number(localStorage.getItem('serial_terminal_font_size'));
     return saved && saved >= 9 && saved <= 24 ? saved : 12;
   });
+
+  // Reconnect timers map
+  const reconnectTimers = useRef<Map<string, number>>(new Map());
+
+  // Default Auto-Close Timeout (seconds)
+  const [defaultAutoCloseSec, setDefaultAutoCloseSec] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('serial_default_auto_close_sec'));
+    return saved && saved > 0 ? saved : 30;
+  });
+
+  const handleUpdateDefaultAutoCloseSec = (sec: number) => {
+    setDefaultAutoCloseSec(sec);
+    localStorage.setItem('serial_default_auto_close_sec', String(sec));
+  };
+
+  // Refs for asynchronous Tauri serial event listener to avoid stale closures
+  const panelsRef = useRef(panels);
+  panelsRef.current = panels;
+  const triggerConfigRef = useRef(triggerConfig);
+  triggerConfigRef.current = triggerConfig;
+  const autoNamingRef = useRef(autoNaming);
+  autoNamingRef.current = autoNaming;
+  const filterTagsRef = useRef(filterTags);
+  filterTagsRef.current = filterTags;
+  const triggerTagsRef = useRef(triggerTags);
+  triggerTagsRef.current = triggerTags;
+  const matchCaseRef = useRef(matchCase);
+  matchCaseRef.current = matchCase;
+  const isRegexRef = useRef(isRegex);
+  isRegexRef.current = isRegex;
+  const isVariableModeRef = useRef(isVariableMode);
+  isVariableModeRef.current = isVariableMode;
+  const maxLogCapacityRef = useRef(maxLogCapacity);
+  maxLogCapacityRef.current = maxLogCapacity;
+  const langRef = useRef(lang);
+  langRef.current = lang;
+
+  const handleUpdateMaxLogCapacity = (cap: number) => {
+    setMaxLogCapacity(cap);
+    localStorage.setItem('serial_max_log_capacity', String(cap));
+    setPanels((prev) =>
+      prev.map((p) => ({
+        ...p,
+        lines: p.lines.slice(-cap),
+        rawLines: p.rawLines.slice(-cap),
+      }))
+    );
+  };
+
+  const handleUpdateAutoNaming = (cfg: AutoNamingConfig) => {
+    setAutoNaming(cfg);
+    localStorage.setItem('serial_auto_naming_config', JSON.stringify(cfg));
+  };
+
+  const handleUpdateTriggerConfig = (cfg: TriggerActionsConfig) => {
+    setTriggerConfig(cfg);
+    saveTriggerConfig(cfg);
+    setPanels((prev) => prev.map((p) => ({ ...p, isArmed: cfg.armedMode })));
+  };
 
   const handleZoomIn = useCallback(() => {
     setTerminalFontSize((prev) => {
@@ -233,6 +343,46 @@ export function App() {
     }
   }, []);
 
+  // Auto Reconnect Engine
+  const startAutoReconnect = useCallback(
+    (sessionId: string, portName: string, baudRate: number, resetOnConnect: boolean) => {
+      if (reconnectTimers.current.has(sessionId)) {
+        window.clearInterval(reconnectTimers.current.get(sessionId));
+      }
+
+      const intervalId = window.setInterval(async () => {
+        try {
+          const currentPorts: SerialDeviceInfo[] = await invoke('scan_ports', { filter: '' });
+          const portExists = currentPorts.some((p) => p.port_name === portName);
+          if (portExists) {
+            await invoke('connect_port', {
+              sessionId,
+              portName,
+              baudRate,
+              resetOnConnect,
+            });
+
+            window.clearInterval(intervalId);
+            reconnectTimers.current.delete(sessionId);
+            setPanels((prev) =>
+              prev.map((p) => (p.id === sessionId ? { ...p, isConnected: true, isReconnecting: false } : p))
+            );
+            showToast(
+              langRef.current === 'tr'
+                ? `✅ [${portName}] Bağlantı otomatik olarak yeniden sağlandı!`
+                : `✅ [${portName}] Connection automatically restored!`
+            );
+          }
+        } catch {
+          // Port opening or still waiting, retry next interval
+        }
+      }, 1500);
+
+      reconnectTimers.current.set(sessionId, intervalId);
+    },
+    [showToast]
+  );
+
   // Initial port discovery and initial panel
   useEffect(() => {
     refreshPorts().then((ports) => {
@@ -261,7 +411,6 @@ export function App() {
       }
     });
 
-    // Auto-poll ports every 4 seconds to discover newly plugged devices
     const interval = setInterval(() => {
       refreshPorts();
     }, 4000);
@@ -273,61 +422,306 @@ export function App() {
   useEffect(() => {
     let unlistenData: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
+    let unlistenAiAction: (() => void) | undefined;
+    let unlistenAiCommand: (() => void) | undefined;
+    let unlistenAiModels: (() => void) | undefined;
 
     const setupListeners = async () => {
       unlistenData = await listen<SerialDataPayload>('serial-data', (event) => {
         const payload = event.payload;
+        const currentPanels = panelsRef.current;
+        const targetPanel = currentPanels.find((p) => p.id === payload.session_id);
+        if (!targetPanel) return;
 
-        // Check trigger tags if set
-        if (triggerTags.length > 0) {
-          triggerTags.forEach((trig) => {
-            const trimmed = trig.trim();
-            if (trimmed && payload.line.toLowerCase().includes(trimmed.toLowerCase())) {
-              showToast(
-                lang === 'tr'
-                  ? `🎯 Tetikleyici Yakalandı: "${trimmed}"`
-                  : `🎯 Trigger Caught: "${trimmed}"`
-              );
-            }
-          });
+        // 1. Auto-naming rule evaluation
+        let updatedTitle = targetPanel.title;
+        if (autoNamingRef.current.enabled) {
+          const extracted = evaluateAutoNaming(payload.line, autoNamingRef.current.rule);
+          if (
+            extracted &&
+            extracted !== targetPanel.title &&
+            (targetPanel.title.startsWith('Panel') ||
+              targetPanel.title.startsWith('Port:') ||
+              targetPanel.title.includes('esp32') ||
+              !targetPanel.title)
+          ) {
+            updatedTitle = extracted;
+            showToast(
+              langRef.current === 'tr'
+                ? `🏷️ Otomatik İsimlendirildi: "${extracted}"`
+                : `🏷️ Auto-Named: "${extracted}"`
+            );
+          }
         }
 
-        setPanels((prevPanels) =>
-          prevPanels.map((p) => {
-            if (p.id !== payload.session_id) return p;
+        // 2. Check trigger tags
+        let triggerMatched = false;
+        let matchedTriggerWord = '';
+        if (triggerTagsRef.current.length > 0) {
+          for (const trig of triggerTagsRef.current) {
+            const trimmed = trig.trim();
+            if (trimmed && payload.line.toLowerCase().includes(trimmed.toLowerCase())) {
+              triggerMatched = true;
+              matchedTriggerWord = trimmed;
+              break;
+            }
+          }
+        }
 
-            const nextLines = [...p.lines, payload.line];
-            const nextRaw = [...p.rawLines, payload.line];
+        // Trigger action execution
+        if (triggerMatched) {
+          executeTriggerActions(
+            triggerConfigRef.current,
+            {
+              panelId: targetPanel.id,
+              port: targetPanel.port,
+              panelTitle: updatedTitle,
+              matchedLine: payload.line,
+              triggerWord: matchedTriggerWord,
+            },
+            {
+              onNotification: showToast,
+              onSendCommand: async (pId, cmd) => {
+                await invoke('send_data', { sessionId: pId, data: cmd + '\r\n' });
+              },
+              onRestartConnection: async (pId) => {
+                await invoke('disconnect_port', { sessionId: pId });
+                setTimeout(async () => {
+                  const p = panelsRef.current.find((x) => x.id === pId);
+                  if (p && p.port) {
+                    await invoke('connect_port', {
+                      sessionId: pId,
+                      portName: p.port,
+                      baudRate: p.baudRate,
+                      resetOnConnect: p.resetOnConnect,
+                    });
+                  }
+                }, 300);
+              },
+              onEndConnection: async (pId) => {
+                await invoke('disconnect_port', { sessionId: pId });
+              },
+            }
+          );
+          showToast(
+            langRef.current === 'tr'
+              ? `🎯 TETİKLEYİCİ YAKALANDI: "${matchedTriggerWord}"`
+              : `🎯 TRIGGER HIT: "${matchedTriggerWord}"`
+          );
+        }
 
-            return {
-              ...p,
-              lines: nextLines.length > MAX_BUFFERED_LINES ? nextLines.slice(-MAX_BUFFERED_LINES) : nextLines,
-              rawLines: nextRaw.length > MAX_BUFFERED_LINES ? nextRaw.slice(-MAX_BUFFERED_LINES) : nextRaw,
-              rxBytes: payload.rx_bytes,
-              txBytes: payload.tx_bytes,
-            };
-          })
-        );
+        // 3. Armed Mode pre-trigger filtering:
+        // "tetikleme açıksa tetiklene kadar filtrelenmiş kelimeli satırlar dışında hiçbir kayıt tutulmaz."
+        const isArmed = triggerConfigRef.current.armedMode && !targetPanel.wasTriggered;
+        let shouldRecordLine = true;
+
+        if (isArmed && !triggerMatched) {
+          const matchesFilter =
+            filterTagsRef.current.length > 0 &&
+            isLineMatchingFilters(
+              payload.line,
+              filterTagsRef.current,
+              matchCaseRef.current,
+              isRegexRef.current,
+              isVariableModeRef.current
+            );
+          if (!matchesFilter) {
+            shouldRecordLine = false;
+          }
+        }
+
+        if (shouldRecordLine) {
+          setPanels((prevPanels) =>
+            prevPanels.map((p) => {
+              if (p.id !== payload.session_id) return p;
+              const nextLines = [...p.lines, payload.line];
+              const nextRaw = [...p.rawLines, payload.line];
+              const cap = maxLogCapacityRef.current;
+
+              return {
+                ...p,
+                title: updatedTitle,
+                wasTriggered: triggerMatched ? true : p.wasTriggered,
+                lines: nextLines.length > cap ? nextLines.slice(-cap) : nextLines,
+                rawLines: nextRaw.length > cap ? nextRaw.slice(-cap) : nextRaw,
+                rxBytes: payload.rx_bytes,
+                txBytes: payload.tx_bytes,
+              };
+            })
+          );
+        } else if (updatedTitle !== targetPanel.title) {
+          setPanels((prevPanels) =>
+            prevPanels.map((p) => (p.id === payload.session_id ? { ...p, title: updatedTitle } : p))
+          );
+        }
       });
 
       unlistenStatus = await listen<SerialStatusPayload>('serial-status', (event) => {
         const payload = event.payload;
-        setPanels((prevPanels) =>
-          prevPanels.map((p) => {
-            if (p.id !== payload.session_id) return p;
-            return {
-              ...p,
-              isConnected: payload.status === 'connected',
-              isReconnecting: payload.status === 'reconnecting',
-            };
-          })
-        );
+        const currentPanels = panelsRef.current;
+        const targetPanel = currentPanels.find((p) => p.id === payload.session_id);
 
         if (payload.status === 'disconnected') {
           showToast(`⚠️ ${payload.message}`);
+          if (targetPanel && targetPanel.autoReconnect && !targetPanel.isReference && targetPanel.port) {
+            setPanels((prevPanels) =>
+              prevPanels.map((p) =>
+                p.id === payload.session_id ? { ...p, isConnected: false, isReconnecting: true } : p
+              )
+            );
+            startAutoReconnect(
+              payload.session_id,
+              targetPanel.port,
+              targetPanel.baudRate,
+              targetPanel.resetOnConnect
+            );
+          } else {
+            setPanels((prevPanels) =>
+              prevPanels.map((p) =>
+                p.id === payload.session_id ? { ...p, isConnected: false, isReconnecting: false } : p
+              )
+            );
+          }
         } else if (payload.status === 'connected') {
           showToast(`✅ ${payload.message}`);
+          if (reconnectTimers.current.has(payload.session_id)) {
+            window.clearInterval(reconnectTimers.current.get(payload.session_id));
+            reconnectTimers.current.delete(payload.session_id);
+          }
+          setPanels((prevPanels) =>
+            prevPanels.map((p) =>
+              p.id === payload.session_id ? { ...p, isConnected: true, isReconnecting: false } : p
+            )
+          );
         }
+      });
+
+      unlistenAiAction = await listen<any>('ai-action', (event) => {
+        const payload = event.payload || {};
+        const actionType = payload.type || payload.action;
+
+        if (actionType === 'filter') {
+          if (payload.action === 'clear') {
+            setFilterTags([]);
+            showToast('🤖 AI: Filtreler temizlendi');
+          } else if (payload.action === 'remove' && Array.isArray(payload.tags)) {
+            setFilterTags((prev) => prev.filter((t) => !payload.tags.includes(t)));
+            showToast(`🤖 AI: Filtreler silindi [${payload.tags.join(', ')}]`);
+          } else if (Array.isArray(payload.tags)) {
+            setFilterTags((prev) => {
+              const set = new Set([...prev, ...payload.tags]);
+              return Array.from(set);
+            });
+            showToast(`🤖 AI: Filtreler eklendi [${payload.tags.join(', ')}]`);
+          } else {
+            const filterStr = payload.filter || payload.tag || payload.text;
+            if (filterStr && typeof filterStr === 'string') {
+              const trimmed = filterStr.trim();
+              if (trimmed && !filterTagsRef.current.includes(trimmed)) {
+                setFilterTags((prev) => [...prev, trimmed]);
+                showToast(`🤖 AI: Filtre eklendi "${trimmed}"`);
+              }
+            }
+          }
+        } else if (actionType === 'trigger') {
+          const trigStr = payload.trigger || payload.tag || payload.word;
+          if (trigStr && typeof trigStr === 'string') {
+            const trimmed = trigStr.trim();
+            if (trimmed && !triggerTagsRef.current.includes(trimmed)) {
+              setTriggerTags((prev) => [...prev, trimmed]);
+              showToast(`🤖 AI: Hedef tetikleyici eklendi "${trimmed}"`);
+            }
+          }
+        } else if (actionType === 'add_pin' || actionType === 'pin') {
+          const rawLineIdx = payload.lineIndex ?? payload.line ?? payload.line_idx;
+          const isExplicitLast =
+            Boolean(payload.isLastLine) ||
+            rawLineIdx === undefined ||
+            rawLineIdx === null ||
+            rawLineIdx === 'last' ||
+            Number(rawLineIdx) < 0;
+
+          const pinText = payload.note || payload.description || payload.text || `${new Date().toLocaleTimeString()} AI Pin`;
+          const pinEmoji = payload.emoji || '📌';
+          const pinShape = payload.shape;
+          const pinColor = payload.color;
+          const pinDesc = payload.description || payload.note;
+          const pinKey = payload.key;
+          const pinId = payload.pinId || `pin_ai_${Date.now()}`;
+          const sId = payload.sessionId;
+
+          let taggedLineNum = 1;
+
+          setPanels((prev) => {
+            if (prev.length === 0) return prev;
+            return prev.map((p) => {
+              if (sId && p.id !== sId) return p;
+              const effectiveLineIdx = isExplicitLast
+                ? Math.max(0, p.lines.length - 1)
+                : Math.max(0, Number(rawLineIdx));
+              taggedLineNum = effectiveLineIdx + 1;
+
+              const newPin: LogPin = {
+                id: pinId,
+                lineIndex: effectiveLineIdx,
+                text: pinText,
+                timestamp: payload.timestamp || Date.now(),
+                lineContent: p.lines[effectiveLineIdx] ? p.lines[effectiveLineIdx].slice(0, 150) : undefined,
+                shape: pinShape,
+                color: pinColor,
+                emoji: pinEmoji,
+                description: pinDesc,
+                key: pinKey,
+              };
+              const updatedPins = [...(p.pins || []).filter((x) => x.lineIndex !== effectiveLineIdx), newPin];
+              return { ...p, pins: updatedPins };
+            });
+          });
+          const lineLabel = isExplicitLast ? `[Son Satır #L${taggedLineNum}]` : `Satır ${taggedLineNum}`;
+          showToast(`🤖 AI: ${lineLabel} etiketlendi: "${pinText}"`);
+        } else if (actionType === 'remove_pin') {
+          const pId = payload.pinId;
+          const lineIdx = payload.lineIndex;
+          setPanels((prev) =>
+            prev.map((p) => ({
+              ...p,
+              pins: (p.pins || []).filter((x) => {
+                if (pId && x.id === pId) return false;
+                if (lineIdx !== undefined && x.lineIndex === lineIdx) return false;
+                return true;
+              }),
+            }))
+          );
+        } else if (actionType === 'connect') {
+          const portName = payload.port;
+          const sId = payload.sessionId;
+          setPanels((prev) =>
+            prev.map((p) => (p.id === sId || p.port === portName ? { ...p, isConnected: true } : p))
+          );
+        } else if (actionType === 'disconnect') {
+          const sId = payload.sessionId;
+          setPanels((prev) =>
+            prev.map((p) => (sId ? (p.id === sId ? { ...p, isConnected: false } : p) : { ...p, isConnected: false }))
+          );
+        }
+      });
+
+      unlistenAiModels = await listen<AiModelClient[]>('ai-models-updated', (event) => {
+        setConnectedAiModels(event.payload || []);
+      });
+
+      unlistenAiCommand = await listen<AiCommandLog>('ai-command-log', (event) => {
+        const entry = event.payload;
+        setAiLogs((prev) => {
+          const next = [entry, ...prev].slice(0, 200);
+          try {
+            localStorage.setItem('esp32_ai_command_logs', JSON.stringify(next));
+          } catch (e) {
+            console.warn('Failed to save ai command logs:', e);
+          }
+          return next;
+        });
+        showToast(`🤖 AI Terminal: ./smp ${entry.command || `${entry.method} ${entry.endpoint}`}`);
       });
     };
 
@@ -336,13 +730,16 @@ export function App() {
     return () => {
       if (unlistenData) unlistenData();
       if (unlistenStatus) unlistenStatus();
+      if (unlistenAiAction) unlistenAiAction();
+      if (unlistenAiModels) unlistenAiModels();
+      if (unlistenAiCommand) unlistenAiCommand();
     };
-  }, [triggerTags, showToast, lang]);
+  }, [showToast, startAutoReconnect]);
 
   // Panel Management
   const handleAddPanel = () => {
     const defaultPort = availablePorts.length > 0 ? availablePorts[0].port_name : '';
-    const newPanel = createSession(defaultPort, false, [], `Panel ${panels.length + 1}`);
+    const newPanel = createSession(defaultPort, false, [], `Panel ${panels.length + 1}`, defaultAutoCloseSec);
     setPanels((prev) => [...prev, newPanel]);
   };
 
@@ -382,10 +779,23 @@ export function App() {
   };
 
   const handleOpenArchiveAsReference = (_filepath: string, content: string, filename: string) => {
+    let parsedPins: LogPin[] | undefined;
+    const pinsMatch = content.match(/Pins:\s*(\[.*?\])(?:\r?\n|$)/);
+    if (pinsMatch) {
+      try {
+        parsedPins = JSON.parse(pinsMatch[1]);
+      } catch (e) {
+        console.warn('Failed to parse pins from archive:', e);
+      }
+    }
+
     const rawLines = content.split(/\r?\n/);
     const refPanel = createSession('', true, rawLines, `Arşiv: ${filename}`);
+    if (parsedPins) {
+      refPanel.pins = parsedPins;
+    }
     setPanels((prev) => [refPanel, ...prev]);
-    showToast(`📂 "${filename}" referans penceresinde açıldı.`);
+    showToast(`📂 "${filename}" referans penceresinde açıldı${parsedPins ? ` (${parsedPins.length} pin ile)` : ''}.`);
   };
 
   const handleClearAll = () => {
@@ -459,10 +869,32 @@ export function App() {
     );
   };
 
+  const handleBulkAddFilters = (items: string[], isTrigger: boolean) => {
+    if (isTrigger) {
+      setTriggerTags((prev) => {
+        const next = [...prev];
+        for (const item of items) {
+          if (!next.includes(item)) next.push(item);
+        }
+        return next;
+      });
+    } else {
+      setFilterTags((prev) => {
+        const next = [...prev];
+        for (const item of items) {
+          if (!next.includes(item)) next.push(item);
+        }
+        return next;
+      });
+    }
+    setFilterMatchingOnly(true);
+  };
+
   const handleAddTriggerTag = (tagText?: string) => {
-    const text = (tagText !== undefined ? tagText : searchTagInput).trim();
-    if (!text) return;
-    const parts = text.split(',').map((s) => s.trim()).filter(Boolean);
+    const raw = (tagText !== undefined ? tagText : searchTagInput).trim();
+    if (!raw) return;
+    const cleaned = raw.replace(/^[:\s]+/, '');
+    const parts = cleaned.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
     if (parts.length > 0) {
       setTriggerTags((prev) => {
         const next = [...prev];
@@ -487,9 +919,10 @@ export function App() {
   };
 
   const handleAddTag = (tagText: string) => {
-    const trimmed = tagText.trim();
-    if (!trimmed) return;
-    const parts = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    const raw = tagText.trim();
+    if (!raw) return;
+    const cleaned = raw.replace(/^[:\s]+/, '');
+    const parts = cleaned.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
     if (parts.length > 0) {
       setFilterTags((prev) => {
         const next = [...prev];
@@ -501,6 +934,88 @@ export function App() {
       setSearchTagInput('');
       setFilterMatchingOnly(true);
     }
+  };
+
+  const handleSearchInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text');
+    if (pasted && (pasted.includes(',') || pasted.includes('\n'))) {
+      e.preventDefault();
+      const cleaned = pasted.replace(/^[:\s]+/, '');
+      const parts = cleaned.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+      if (parts.length > 0) {
+        setFilterTags((prev) => {
+          const next = [...prev];
+          for (const p of parts) {
+            if (!next.includes(p)) next.push(p);
+          }
+          return next;
+        });
+        setSearchTagInput('');
+        setFilterMatchingOnly(true);
+        showToast(
+          lang === 'tr'
+            ? `✅ ${parts.length} filtre toplu eklendi.`
+            : `✅ Added ${parts.length} filters in bulk.`
+        );
+      }
+    }
+  };
+
+  const handleRestoreFiltersFromDrive = (data: {
+    tags: string[];
+    triggerTags: string[];
+    presets: FilterPreset[];
+  }) => {
+    if (data.tags) setFilterTags(data.tags);
+    if (data.triggerTags) setTriggerTags(data.triggerTags);
+    setFilterMatchingOnly(true);
+  };
+
+  const handleRestoreSettingsFromDrive = (data: {
+    maxLogCapacity?: number;
+    terminalFont?: string;
+    terminalFontSize?: number;
+    triggerActions?: TriggerActionsConfig;
+    autoNaming?: AutoNamingConfig;
+    defaultAutoCloseSec?: number;
+  }) => {
+    if (data.maxLogCapacity) handleUpdateMaxLogCapacity(data.maxLogCapacity);
+    if (data.terminalFont) handleFontChange(data.terminalFont);
+    if (data.terminalFontSize) handleFontSizeChange(data.terminalFontSize);
+    if (data.triggerActions) handleUpdateTriggerConfig(data.triggerActions);
+    if (data.autoNaming) handleUpdateAutoNaming(data.autoNaming);
+    if (data.defaultAutoCloseSec) handleUpdateDefaultAutoCloseSec(data.defaultAutoCloseSec);
+  };
+
+  const handleRestorePinsFromDrive = (pins: LogPin[], targetPanelId?: string) => {
+    if (!pins || pins.length === 0) return;
+    setPanels((prev) => {
+      if (prev.length === 0) return prev;
+      const targetId = targetPanelId || prev[0].id;
+      return prev.map((p) => (p.id === targetId ? { ...p, pins } : p));
+    });
+    showToast(lang === 'tr' ? `📌 ${pins.length} pin Drive'dan geri yüklendi!` : `📌 ${pins.length} pins restored from Drive!`);
+  };
+
+  const handleRestorePanelsFromDrive = (panelsData: Partial<PanelSession>[]) => {
+    if (!panelsData || panelsData.length === 0) return;
+    const newPanels = panelsData.map((d, idx) => {
+      const s = createSession(d.port || '', d.isReference || false, d.lines || [], d.title || `Panel ${idx + 1}`);
+      s.pins = d.pins || [];
+      return s;
+    });
+    setPanels(newPanels);
+    showToast(lang === 'tr' ? `📂 ${newPanels.length} panel Drive'dan eksiksiz geri yüklendi!` : `📂 ${newPanels.length} panels restored from Drive!`);
+  };
+
+  const handleOpenDriveLogAsReference = (content: string, filename: string, pins?: LogPin[]) => {
+    const rawLines = content.split(/\r?\n/);
+    const refPanel = createSession('', true, rawLines, `Drive: ${filename}`);
+    if (pins && pins.length > 0) {
+      refPanel.pins = pins;
+    }
+    setPanels((prev) => [refPanel, ...prev]);
+    showToast(`☁️ "${filename}" referans panelinde açıldı${pins && pins.length > 0 ? ` (${pins.length} pin ile)` : ''}.`);
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
@@ -629,6 +1144,64 @@ export function App() {
           >
             <Trash2 className="w-4 h-4" />
           </button>
+
+          <div className="h-4 w-px bg-[#26283b] mx-0.5" />
+
+          {/* Google Drive Cloud Backup */}
+          <button
+            onClick={() => setIsGDriveModalOpen(true)}
+            title={t('gdriveBackup', lang)}
+            className="p-1.5 rounded-md bg-[#1e2030] text-[#a6adc8] hover:text-emerald-300 hover:bg-emerald-950/30 border border-[#313244] transition cursor-pointer shrink-0"
+          >
+            <Cloud className="w-4 h-4 text-emerald-400" />
+          </button>
+
+          {/* Trigger Settings & Armed Mode */}
+          <button
+            onClick={() => setIsTriggerSettingsModalOpen(true)}
+            title={`${t('triggerSettings', lang)}${triggerConfig.armedMode ? ' (ARMED)' : ''}`}
+            className={`p-1.5 rounded-md border transition cursor-pointer shrink-0 flex items-center gap-1 ${
+              triggerConfig.armedMode
+                ? 'bg-rose-950/70 text-rose-300 border-rose-500/60 shadow-sm shadow-rose-500/30'
+                : 'bg-[#1e2030] text-[#a6adc8] hover:text-rose-300 hover:bg-rose-950/30 border-[#313244]'
+            }`}
+          >
+            <Target className="w-4 h-4 text-rose-400" />
+            {triggerConfig.armedMode && (
+              <span className="text-[9px] font-mono font-bold text-rose-300">ARMED</span>
+            )}
+          </button>
+
+          {/* AI Model Terminal & Audit Console */}
+          <button
+            onClick={() => setIsAiModalOpen(true)}
+            title={
+              lang === 'tr'
+                ? `🤖 AI Model Terminal & Denetim Konsolu (${aiLogs.length} işlem, ${connectedAiModels.length} bağlı model)`
+                : `🤖 AI Model Terminal & Audit Console (${aiLogs.length} logs, ${connectedAiModels.length} active agents)`
+            }
+            className={`p-1.5 rounded-md border transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
+              connectedAiModels.length > 0
+                ? 'bg-indigo-950/70 text-indigo-300 border-indigo-500/60 hover:bg-indigo-900/80 shadow-sm shadow-indigo-500/30'
+                : aiLogs.length > 0
+                ? 'bg-purple-950/70 text-purple-300 border-purple-500/50 hover:bg-purple-900/80 shadow-sm shadow-purple-500/20'
+                : 'bg-[#1e2030] text-[#a6adc8] hover:text-purple-300 hover:bg-purple-950/30 border-[#313244]'
+            }`}
+          >
+            {connectedAiModels.length > 0 ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            ) : (
+              <Bot className="w-4 h-4 text-purple-400" />
+            )}
+            <span className="text-[10px] font-mono font-bold text-purple-300">
+              {connectedAiModels.length > 0 ? `${connectedAiModels.length} AI` : 'AI'}
+            </span>
+            {aiLogs.length > 0 && (
+              <span className="px-1 py-0.2 rounded-full bg-purple-500/30 text-purple-200 text-[9px] font-mono font-bold">
+                {aiLogs.length}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Center: Global Multi-Tag Search & Real-time Cross-Panel Filtering (OR logic) */}
@@ -730,14 +1303,15 @@ export function App() {
               value={searchTagInput}
               onChange={(e) => setSearchTagInput(e.target.value)}
               onKeyDown={handleSearchInputKeyDown}
+              onPaste={handleSearchInputPaste}
               placeholder={
                 filterTags.length === 0 && triggerTags.length === 0
                   ? isVariableMode
                     ? t('variableSearchPlaceholder', lang)
                     : t('searchPlaceholder', lang)
                   : lang === 'tr'
-                  ? '+ filtre (Enter) / tetikleyici (🎯)...'
-                  : '+ filter (Enter) / trigger (🎯)...'
+                  ? '+ filtre (Enter/Virgül) / tetikleyici (🎯)...'
+                  : '+ filter (Enter/Comma) / trigger (🎯)...'
               }
               className="flex-1 min-w-[90px] bg-transparent text-xs text-[#cdd6f4] placeholder-[#45475a] outline-none font-mono"
             />
@@ -1024,6 +1598,7 @@ export function App() {
               onNotification={showToast}
               terminalFont={terminalFont}
               terminalFontSize={terminalFontSize}
+              defaultAutoCloseSec={defaultAutoCloseSec}
               onZoomIn={handleZoomIn}
               onZoomOut={handleZoomOut}
             />
@@ -1060,6 +1635,57 @@ export function App() {
         matchCase={matchCase}
         isRegex={isRegex}
         onApplyPreset={handleApplyPreset}
+        onNotification={showToast}
+      />
+
+      {/* Google Drive Modal Dialog */}
+      <GoogleDriveModal
+        isOpen={isGDriveModalOpen}
+        onClose={() => setIsGDriveModalOpen(false)}
+        lang={lang}
+        panels={panels}
+        filterTags={filterTags}
+        triggerTags={triggerTags}
+        filterPresets={[]}
+        maxLogCapacity={maxLogCapacity}
+        terminalFont={terminalFont}
+        terminalFontSize={terminalFontSize}
+        triggerActions={triggerConfig}
+        autoNaming={autoNaming}
+        defaultAutoCloseSec={defaultAutoCloseSec}
+        onRestoreFilters={handleRestoreFiltersFromDrive}
+        onRestoreSettings={handleRestoreSettingsFromDrive}
+        onRestorePins={handleRestorePinsFromDrive}
+        onRestorePanels={handleRestorePanelsFromDrive}
+        onOpenLogAsReference={handleOpenDriveLogAsReference}
+        onNotification={showToast}
+      />
+
+      {/* AI Activity & Model Terminal Console */}
+      <AiActivityModal
+        isOpen={isAiModalOpen}
+        onClose={() => setIsAiModalOpen(false)}
+        lang={lang}
+        aiLogs={aiLogs}
+        connectedAiModels={connectedAiModels}
+        onClearLogs={handleClearAiLogs}
+        onNotification={showToast}
+      />
+
+      {/* Trigger & Actions Settings Modal */}
+      <TriggerSettingsModal
+        isOpen={isTriggerSettingsModalOpen}
+        onClose={() => setIsTriggerSettingsModalOpen(false)}
+        lang={lang}
+        triggerConfig={triggerConfig}
+        onUpdateTriggerConfig={handleUpdateTriggerConfig}
+        autoNaming={autoNaming}
+        onUpdateAutoNaming={handleUpdateAutoNaming}
+        maxLogCapacity={maxLogCapacity}
+        onUpdateMaxLogCapacity={handleUpdateMaxLogCapacity}
+        defaultAutoCloseSec={defaultAutoCloseSec}
+        onUpdateDefaultAutoCloseSec={handleUpdateDefaultAutoCloseSec}
+        onBulkAddFilters={handleBulkAddFilters}
         onNotification={showToast}
       />
 

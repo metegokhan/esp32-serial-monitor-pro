@@ -9,7 +9,7 @@ export const TRANSLATIONS = {
     language: 'Dil',
     langTr: 'Türkçe',
     langEn: 'English',
-    searchPlaceholder: 'Filtrele veya ara (Enter ile etiket ekle)...',
+    searchPlaceholder: 'Filtrele veya ara (Enter / Virgül ile toplu ekle)...',
     filterMatchingOnly: 'Sadece Eşleşenleri Göster',
     filterMatchingOnlyTip: 'Açık olan TÜM panellerde etiketlerden en az birini içeren satırları filtreler (A veya B)',
     matchCase: 'Aa Eşle',
@@ -35,7 +35,15 @@ export const TRANSLATIONS = {
     disconnect: 'Bağlantıyı Kes',
     resetOnConnect: 'Resetle',
     resetOnConnectTip: 'Bağlanırken Cihazı Resetle (DTR/RTS):\n• İşaretli: Port açıldığında donanımsal reset atılır (boot loglarını baştan yakalamak için).\n• İşaretsiz (Varsayılan): Tıpkı Arduino Serial Monitor gibi cihaz kesintisiz çalışmaya devam eder.',
-    autoReconnect: 'Oto-Bağlan',
+    autoReconnect: 'Oto-Yeniden Bağlan',
+    autoReconnectTip: 'Bağlantı koptuğunda veya cihaz yeniden başlatıldığında otomatik olarak tekrar bağlanır',
+    autoClose: 'Oto Kapat',
+    autoCloseTip: 'Belirtilen saniye sonra portu otomatik kapatır (portun boşuna tutulmasını önler). Değer girilmezse hep açık kalır.',
+    autoCloseSeconds: 'sn',
+    autoCloseRemaining: 'Otomatik kapanmaya {sec} sn kaldı (İptal etmek için tıklayın)',
+    autoCloseTriggeredMsg: '⏱️ [{port}] Otomatik kapatma süresi ({sec} sn) tamamlandı. Port serbest bırakıldı.',
+    defaultAutoCloseSec: 'Varsayılan Otomatik Kapatma (Saniye)',
+    defaultAutoCloseTip: 'Yeni paneller için otomatik kapanma süresi. Portun boşuna tutulmasını önler (0 = devre dışı / hep açık kalır).',
     hwReset: 'Reset (EN)',
     hwResetTip: 'ESP32 Donanımsal Reset (F5)',
     bootloader: 'Boot (IO0)',
@@ -70,12 +78,64 @@ export const TRANSLATIONS = {
     noArchives: 'Henüz arşivlenmiş oturum bulunmuyor.',
     confirmDelete: '"{name}" arşivi silinsin mi?',
     
-    // Font settings
+    // Font & Display settings
     fontFamily: 'Yazı Tipi',
     fontSize: 'Yazı Boyutu',
     decreaseFontSize: 'Yazı Boyutunu Küçült (Ctrl+-)',
     increaseFontSize: 'Yazı Boyutunu Büyüt (Ctrl++)',
-    
+    maxLogCapacity: 'Maksimum Log Kapasitesi (Satır)',
+    maxLogCapacityTip: 'Panel belleğinde tutulacak en fazla satır sayısı (aşınca eskiler otomatik temizlenir)',
+
+    // Bulk Filters
+    bulkFilterModal: 'Toplu Filtre Ekle',
+    bulkFilterTip: 'Virgül veya yeni satır ile ayrılmış çoklu filtreleri tek seferde ekleyin',
+    bulkFilterPlaceholder: 'Örn: HEAP BOZULDU, CORRUPT HEAP, uygulama TCB, jpeg, Guru Meditation, MEPC, TESHIS',
+    addAsNormalFilters: 'Normal Filtre Olarak Ekle',
+    addAsTriggers: '🎯 Tetikleyici Olarak Ekle',
+
+    // Trigger Actions
+    triggerActions: 'Tetikleme Aksiyonları',
+    triggerSettings: 'Tetikleme & Aksiyon Ayarları',
+    triggerArmed: 'Tetikleme Modu (Armed)',
+    triggerArmedTip: 'Tetikleme açıksa tetiklenene kadar filtrelenmiş kelimeli satırlar dışında hiçbir kayıt tutulmaz',
+    playAudio: 'Ses Çalma (Web Audio)',
+    httpsTrigger: 'HTTPS Webhook Tetikleme',
+    webhookUrl: 'Webhook URL',
+    restartConnection: 'Bağlantıyı Yeniden Başlat (Restart Connection)',
+    sendSerialCommand: 'Seri Porta Komut Gönder',
+    endSerialConnection: 'Seri Bağlantıyı Sonlandır (End Connection)',
+    testAction: 'Test Et',
+
+    // Auto Naming
+    autoNaming: 'Otomatik Panel İsimlendirme',
+    autoNamingTip: 'Boot loglarından model/etiket yakalayarak paneli ve kayıt dosyalarını otomatik isimlendirir',
+    autoNamingRule: 'İsimlendirme Kuralı',
+    autoNamingRuleExample: 'Örn: "esp-rom:" (sonrasını alır) ya da "esp-rom"+ (tüm satırı alır)',
+
+    // Google Drive
+    gdrive: 'Google Drive',
+    gdriveBackup: 'Google Drive Yedekleme & Senkronizasyon',
+    gdriveLogin: 'Google Drive Girişi',
+    gdriveLogout: 'Çıkış Yap',
+    gdriveSaveLogs: 'Logları Drive\'a Yükle',
+    gdriveSaveFilters: 'Filtre Setlerini Drive\'a Yedekle',
+    gdriveSaveSettings: 'Ayarları Drive\'a Yedekle',
+    gdriveFullBackup: 'Tek Tıkla Tam Yedek Al',
+    gdriveFiles: 'Drive Yedek Dosyaları',
+    gdriveRestore: 'Geri Yükle',
+    gdriveOpenAsRef: 'Referans Olarak Aç',
+
+    // Pins & Tags
+    pins: 'Pinler / Taglar',
+    addPin: 'Pin / Tag Ekle',
+    clearAllPins: 'Tüm Pinleri Temizle',
+    pinnedLines: 'Sabitlenmiş Satırlar (Pinler)',
+
+    // AI Model Integration
+    aiConsole: 'AI Model Denetim Konsolu',
+    aiSkill: 'AI Model Beceri & Komut Rehberi',
+    aiCommandsLogged: 'AI model komutları burada anlık loglanır',
+
     // Notifications
     connectedMsg: 'Bağlantı kuruldu: {port} @ {baud} baud',
     disconnectedMsg: 'Bağlantı kesildi: {port}',
@@ -91,7 +151,7 @@ export const TRANSLATIONS = {
     language: 'Language',
     langTr: 'Türkçe',
     langEn: 'English',
-    searchPlaceholder: 'Filter or search (Press Enter to add tag)...',
+    searchPlaceholder: 'Filter or search (Enter / Comma to bulk add)...',
     filterMatchingOnly: 'Show Matches Only',
     filterMatchingOnlyTip: 'Simultaneously filters lines matching ANY of the active filter tags (A or B) across all panels',
     matchCase: 'Match Case',
@@ -118,6 +178,14 @@ export const TRANSLATIONS = {
     resetOnConnect: 'Reset on Connect',
     resetOnConnectTip: 'Reset Device on Connect (DTR/RTS):\n• Checked: Hardware reset is performed on connection (to capture boot logs).\n• Unchecked (Default): Device continues running uninterrupted, like Arduino Serial Monitor.',
     autoReconnect: 'Auto-Reconnect',
+    autoReconnectTip: 'Automatically re-establishes connection if device disconnects or resets',
+    autoClose: 'Auto-Close',
+    autoCloseTip: 'Automatically disconnects the port after specified seconds (prevents holding the port in vain). If no value is entered, it stays open indefinitely.',
+    autoCloseSeconds: 's',
+    autoCloseRemaining: 'Auto-closing in {sec}s (Click to cancel)',
+    autoCloseTriggeredMsg: '⏱️ [{port}] Auto-close timeout ({sec}s) reached. Port released.',
+    defaultAutoCloseSec: 'Default Auto-Close Timeout (Seconds)',
+    defaultAutoCloseTip: 'Default auto-disconnect timeout for panels. Prevents holding the serial port unnecessarily (0 = disabled / always open).',
     hwReset: 'Reset (EN)',
     hwResetTip: 'ESP32 Hardware Reset (F5)',
     bootloader: 'Boot (IO0)',
@@ -152,12 +220,63 @@ export const TRANSLATIONS = {
     noArchives: 'No archived sessions found.',
     confirmDelete: 'Delete archive "{name}"?',
     
-    // Font settings
+    // Font & Display settings
     fontFamily: 'Font Family',
     fontSize: 'Font Size',
     decreaseFontSize: 'Decrease Font Size (Ctrl+-)',
     increaseFontSize: 'Increase Font Size (Ctrl++)',
-    
+    maxLogCapacity: 'Max Log Capacity (Lines)',
+    maxLogCapacityTip: 'Maximum number of buffered lines in memory per panel',
+
+    // Bulk Filters
+    bulkFilterModal: 'Bulk Add Filters',
+    bulkFilterTip: 'Add multiple filters separated by comma or newlines at once',
+    bulkFilterPlaceholder: 'e.g. HEAP BOZULDU, CORRUPT HEAP, uygulama TCB, jpeg, Guru Meditation, MEPC, TESHIS',
+    addAsNormalFilters: 'Add as Normal Filters',
+    addAsTriggers: '🎯 Add as Triggers',
+
+    // Trigger Actions
+    triggerActions: 'Trigger Actions',
+    triggerSettings: 'Trigger & Action Settings',
+    triggerArmed: 'Armed Mode',
+    triggerArmedTip: 'When armed, no logs except matching filter words are stored until a trigger is hit',
+    playAudio: 'Play Sound (Web Audio)',
+    httpsTrigger: 'HTTPS Webhook Trigger',
+    webhookUrl: 'Webhook URL',
+    restartConnection: 'Restart Connection',
+    sendSerialCommand: 'Send Serial Command',
+    endSerialConnection: 'End Serial Connection',
+    testAction: 'Test',
+
+    // Auto Naming
+    autoNaming: 'Auto Panel Naming',
+    autoNamingTip: 'Automatically names panel and saved files from device boot logs',
+    autoNamingRule: 'Naming Rule',
+    autoNamingRuleExample: 'e.g. "esp-rom:" (takes text after) or "esp-rom"+ (takes full line)',
+
+    // Google Drive
+    gdrive: 'Google Drive',
+    gdriveBackup: 'Google Drive Backup & Sync',
+    gdriveLogin: 'Google Drive Sign-in',
+    gdriveLogout: 'Sign Out',
+    gdriveSaveLogs: 'Upload Logs to Drive',
+    gdriveSaveFilters: 'Backup Filter Sets to Drive',
+    gdriveSaveSettings: 'Backup Settings to Drive',
+    gdriveFullBackup: 'Full One-Click Backup',
+    gdriveFiles: 'Drive Backup Files',
+    gdriveRestore: 'Restore',
+    gdriveOpenAsRef: 'Open as Reference',
+    // Pins & Tags
+    pins: 'Pins / Tags',
+    addPin: 'Add Pin / Tag',
+    clearAllPins: 'Clear All Pins',
+    pinnedLines: 'Pinned Lines',
+
+    // AI Model Integration
+    aiConsole: 'AI Model Audit Console',
+    aiSkill: 'AI Model Skill & Command Guide',
+    aiCommandsLogged: 'AI model terminal commands are logged here in real-time',
+
     // Notifications
     connectedMsg: 'Connected: {port} @ {baud} baud',
     disconnectedMsg: 'Disconnected: {port}',

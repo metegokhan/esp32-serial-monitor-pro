@@ -1,5 +1,8 @@
+pub mod ai_server;
 pub mod archive;
+pub mod gdrive_oauth;
 pub mod serial;
+pub mod shell;
 
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -36,6 +39,30 @@ fn send_data(
     data: String,
 ) -> Result<(), String> {
     manager.send_data(&session_id, &data)
+}
+
+#[tauri::command]
+fn send_multiline_data(
+    manager: State<'_, Arc<SerialManager>>,
+    session_id: String,
+    lines: Vec<String>,
+    eol: String,
+    delay_ms: u64,
+) -> Result<usize, String> {
+    manager.send_multiline(&session_id, &lines, &eol, delay_ms)
+}
+
+#[tauri::command]
+async fn execute_shell_command(
+    command: String,
+    cwd: Option<String>,
+    timeout_sec: Option<u64>,
+) -> Result<shell::ShellExecutionResult, String> {
+    tokio::task::spawn_blocking(move || {
+        shell::execute_shell(&command, cwd.as_deref(), timeout_sec)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -113,18 +140,103 @@ async fn open_log_dialog() -> Result<Option<(String, String)>, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct HttpRequestOptions {
+    pub url: String,
+    pub method: String,
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct HttpResponsePayload {
+    pub status: u16,
+    pub ok: bool,
+    pub body: String,
+}
+
+#[tauri::command]
+async fn http_request(options: HttpRequestOptions) -> Result<HttpResponsePayload, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let method = match options.method.to_uppercase().as_str() {
+        "POST" => reqwest::Method::POST,
+        "PUT" => reqwest::Method::PUT,
+        "PATCH" => reqwest::Method::PATCH,
+        "DELETE" => reqwest::Method::DELETE,
+        _ => reqwest::Method::GET,
+    };
+
+    let mut req = client.request(method, &options.url);
+
+    if let Some(headers) = options.headers {
+        for (k, v) in headers {
+            req = req.header(k, v);
+        }
+    }
+
+    if let Some(body) = options.body {
+        req = req.body(body);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("HTTP hatası: {}", e))?;
+    let status = resp.status().as_u16();
+    let ok = resp.status().is_success();
+    let body_text = resp.text().await.map_err(|e| format!("Cevap okunamadı: {}", e))?;
+
+    Ok(HttpResponsePayload {
+        status,
+        ok,
+        body: body_text,
+    })
+}
+
+#[tauri::command]
+async fn start_google_oauth_flow(
+    app: AppHandle,
+    client_id: String,
+    client_secret: Option<String>,
+) -> Result<gdrive_oauth::GoogleAuthTokens, String> {
+    gdrive_oauth::start_oauth_flow(app, client_id, client_secret).await
+}
+
+#[tauri::command]
+async fn refresh_google_oauth_token(
+    client_id: String,
+    client_secret: Option<String>,
+    refresh_token: String,
+) -> Result<gdrive_oauth::GoogleAuthTokens, String> {
+    gdrive_oauth::refresh_access_token(&client_id, client_secret.as_deref(), &refresh_token).await
+}
+
+#[tauri::command]
+fn get_ai_skill_guide() -> String {
+    ai_server::AI_SKILL_DOCUMENT.to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let serial_manager = Arc::new(SerialManager::new());
+    let sm_for_server = serial_manager.clone();
 
     tauri::Builder::default()
         .manage(serial_manager)
         .plugin(tauri_plugin_opener::init())
+        .setup(move |app| {
+            // Start headless AI agent HTTP server on 127.0.0.1:4567
+            ai_server::start_ai_http_server(app.handle().clone(), sm_for_server);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             scan_ports,
             connect_port,
             disconnect_port,
             send_data,
+            send_multiline_data,
+            execute_shell_command,
             reset_esp,
             boot_esp,
             get_archives,
@@ -133,7 +245,12 @@ pub fn run() {
             get_archive_path,
             export_log_dialog,
             open_log_dialog,
+            http_request,
+            start_google_oauth_flow,
+            refresh_google_oauth_token,
+            get_ai_skill_guide,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

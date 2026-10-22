@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+"""
+Serial Monitor Pro (SMP) - AI & Headless Terminal CLI
+Enables autonomous AI models, terminal agents, and automation scripts to control
+ESP32 Serial Monitor Pro via local API.
+"""
+
+import sys
+import os
+import json
+import urllib.request
+import urllib.error
+import urllib.parse
+
+API_BASE = "http://127.0.0.1:4567"
+
+DEFAULT_PRESETS = {
+    "1": {"shape": "circle", "color": "#a855f7", "emoji": "😡", "description": "ekran hatası"},
+    "2": {"shape": "square", "color": "#ef4444", "emoji": "🔊", "description": "cızırtı"},
+    "3": {"shape": "triangle", "color": "#f59e0b", "emoji": "⚠️", "description": "donanım uyarısı"},
+    "4": {"shape": "pentagon", "color": "#10b981", "emoji": "✅", "description": "başarılı test"},
+    "5": {"shape": "diamond", "color": "#06b6d4", "emoji": "⚡", "description": "voltaj dalgalanması"},
+    "6": {"shape": "circle", "color": "#ec4899", "emoji": "🐛", "description": "bellek sızıntısı"},
+}
+
+FALLBACK_SKILL_DOC = """# 🤖 Serial Monitor Pro - AI Agent Skill Guide
+
+Serial Monitor Pro provides an autonomous Headless REST API and CLI tool (`./smp`) for AI agents, LLMs, and terminal scripts to interact with embedded UART hardware (ESP32, Arduino, STM32, Pico).
+
+## 📡 Base URL
+`http://127.0.0.1:4567` (or execute commands via `./smp <command>`)
+
+---
+
+## 🛠️ Commands & Tool Endpoints
+
+### 1. `GET /api/status` (or `./smp status`)
+Returns the complete state of the serial monitor:
+- Active panels & open ports
+- Connected AI models & their operating ports
+- Baud rates & connection statuses
+- RX / TX byte counts & line counts
+- Active filters, triggers, and pins count
+
+### 2. `GET /api/ports` (or `./smp ports`)
+Scans host USB/UART ports. Identifies ESP32, Arduino, CH340, CP2102, FTDI chips with VID/PID and category.
+
+### 3. `POST /api/connect` (or `./smp connect <port> [baud] [--reset]`)
+Connects to a serial port.
+### 3. `POST /api/connect` (or `./smp connect [port|"auto"] [baud] [--reset]`)
+Connects to a serial port.
+- JSON body: `{"port": "auto"|"/dev/ttyUSB0", "baud": 115200, "reset": false}`
+- When omitted or "auto", automatically finds and connects to the connected ESP32/UART device!
+- If already connected, gracefully returns the existing session.
+
+### 4. `POST /api/disconnect` (or `./smp disconnect [session_id]`)
+Disconnects the port cleanly.
+- JSON body: `{"session_id": "session_xxx"}` (or empty for default session).
+
+### 5. `GET /api/logs` (or `./smp logs [--tail N] [--filter <term>]`)
+Fetches the latest N log lines from the device.
+- Query params: `tail=50`, `filter=HEAP`, `session_id=...`
+- Context window filtering: `--filter "tag+5"` shows tagged lines plus 5 context lines before and after!
+- Returns: `{"lines": ["line 1", "line 2", ...], "count": 50}`
+
+### 6. `POST /api/send` (or `./smp send <command> [--delay ms] [--raw] [-f file]`)
+Sends single-line or multiline UART data to the connected device.
+- JSON body: `{"data": "...", "line_delay_ms": 30, "raw": false}`
+- Can send files (`-f script.py`) or read from stdin (`cat code.py | ./smp send -`).
+
+### 7. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
+**⚡ Interactive Serial Execution**: Sends command, waits for device response lines, and prints them immediately!
+- JSON body: `{"command": "help", "timeout_ms": 2500, "expect": ">>>", "line_delay_ms": 30}`
+
+### 8. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
+**💻 Cross-Platform Local Shell Execution**: Runs local shell command (Windows PowerShell / Linux bash/sh).
+- JSON body: `{"command": "idf.py build", "cwd": "/path"}`
+
+### 9. `POST /api/reset` (or `./smp reset`)
+Executes an ESP32 Hardware Reset by pulsing the EN line.
+
+### 10. `POST /api/boot` (or `./smp boot`)
+Forces the ESP32 into ROM Bootloader / Download Mode (IO0 low + EN pulse).
+
+### 11. `POST /api/pin` (or `./smp pin [line_index|"last"] [note] [--preset 1-6]`)
+Tags and bookmarks a log line (or latest line if omitted or "last") with shape, color, emoji, and note.
+- Omit line number or use `last` to tag the latest received serial line instantly during testing!
+- Presets: 1: 😡 ekran hatası, 2: 🔊 cızırtı, 3: ⚠️ donanım uyarısı, 4: ✅ başarılı test, 5: ⚡ voltaj dalgalanması, 6: 🐛 bellek sızıntısı.
+
+### 12. `GET /api/pins` (or `./smp pins`)
+Lists all bookmarked pins and notes across panels.
+
+### 13. `DELETE /api/pin` (or `./smp pin remove <id>`)
+Removes a pin by ID or line index.
+
+### 14. `POST /api/filter` (or `./smp filter add <tags...>`)
+Adds or removes filter tags in the UI.
+- JSON body: `{"action": "add"|"remove"|"clear", "tags": ["HEAP", "Guru Meditation"]}`
+- Supports tag context windows: `tag+5`, `tag+-5`, `tag:ekran hatası+3`
+
+### 15. `POST /api/trigger` (or `./smp trigger add <tag>`)
+Sets an armed target trigger word.
+
+### 16. `GET /api/archives` (or `./smp archives`)
+Lists all recorded session log archives on local disk.
+
+### 17. `GET /api/ai-logs` (or `./smp ai-logs`)
+Returns the audit trail of all commands executed by AI models, visible live in the UI.
+
+### 18. `GET /api/ai-models` (or `./smp ai-models`)
+Cross-model peer visibility: lists connected AI models, their active ports, sessions, and last activity.
+- Agents can supply headers `X-AI-Model: <name>` and `X-AI-Client: <id>` or environment variable `AI_MODEL`.
+
+---
+
+## 💡 Quick Examples (cURL or CLI):
+```bash
+# Auto-connect to plugged ESP32
+./smp connect auto
+# Interactive query: send command and print device response immediately!
+./smp exec "help"
+# Send multiline script with 30ms inter-line delay
+./smp send -f script.py --delay 30
+# Run local shell tool (Windows/Linux)
+./smp shell "esptool.py chip_id"
+# Read logs with tag context window (+- 5 lines)
+./smp logs --filter "tag+5"
+# Tag a crash line with preset 1
+./smp pin --preset 1
+```
+"""
+
+AI_MODEL_ENV = os.environ.get("AI_MODEL", "AI-Agent")
+AI_CLIENT_ENV = os.environ.get("AI_CLIENT", "terminal-client")
+
+def request(path, method="GET", data=None, model_name=None, client_id=None):
+    url = f"{API_BASE}{path}"
+    req = urllib.request.Request(url, method=method)
+    req.add_header("Content-Type", "application/json")
+
+    m = model_name or AI_MODEL_ENV
+    c = client_id or AI_CLIENT_ENV
+    if m:
+        req.add_header("X-AI-Model", m)
+    if c:
+        req.add_header("X-AI-Client", c)
+
+    body = None
+    if data is not None:
+        body = json.dumps(data).encode("utf-8")
+    try:
+        with urllib.request.urlopen(req, data=body, timeout=10) as resp:
+            content = resp.read().decode("utf-8")
+            content_type = resp.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                try:
+                    return json.loads(content)
+                except Exception:
+                    return content
+            return content
+    except urllib.error.URLError as e:
+        if path in ("/api/skill", "/skill", "/help"):
+            return FALLBACK_SKILL_DOC
+        print(f"❌ [SMP CLI Error] Serial Monitor Pro açık değil ({url}): {e}", file=sys.stderr)
+        print("Lütfen Serial Monitor Pro uygulamasını çalıştırın (`./run_v2.sh`).", file=sys.stderr)
+        sys.exit(1)
+
+def print_result(res):
+    if isinstance(res, (dict, list)):
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+    else:
+        print(res)
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help", "help", "skill", "--skill"):
+        # Print Skill Document for AI Agents
+        res = request("/api/skill")
+        print_result(res)
+        return
+
+    cmd = args[0].lower()
+
+    if cmd == "status":
+        print_result(request("/api/status"))
+
+    elif cmd in ("ai-models", "models", "peers"):
+        print_result(request("/api/ai-models"))
+
+    elif cmd == "ports":
+        print_result(request("/api/ports"))
+
+    elif cmd == "connect":
+        port = "auto"
+        baud = 115200
+        reset = False
+        session_id = None
+        i = 1
+        if len(args) > 1 and not args[1].startswith("-"):
+            port = args[1]
+            i = 2
+        while i < len(args):
+            a = args[i]
+            if a.isdigit():
+                baud = int(a)
+                i += 1
+            elif a == "--reset":
+                reset = True
+                i += 1
+            elif a in ("--session", "-s") and i + 1 < len(args):
+                session_id = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        data = {"port": port, "baud": baud, "reset": reset}
+        if session_id:
+            data["session_id"] = session_id
+        print_result(request("/api/connect", "POST", data))
+
+    elif cmd == "disconnect":
+        session_id = args[1] if len(args) > 1 else None
+        data = {"session_id": session_id} if session_id else {}
+        print_result(request("/api/disconnect", "POST", data))
+
+    elif cmd == "send":
+        session_id = None
+        delay_ms = None
+        raw_mode = False
+        file_path = None
+        text_parts = []
+        i = 1
+        while i < len(args):
+            a = args[i]
+            if a in ("--session", "-s") and i + 1 < len(args):
+                session_id = args[i + 1]
+                i += 2
+            elif a in ("--delay", "-d") and i + 1 < len(args):
+                delay_ms = int(args[i + 1])
+                i += 2
+            elif a in ("--file", "-f") and i + 1 < len(args):
+                file_path = args[i + 1]
+                i += 2
+            elif a == "--raw":
+                raw_mode = True
+                i += 1
+            else:
+                text_parts.append(a)
+                i += 1
+
+        content = ""
+        if file_path:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"Hata: Dosya okunamadı: {e}")
+                sys.exit(1)
+        elif text_parts and text_parts[0] == "-":
+            content = sys.stdin.read()
+        else:
+            content = " ".join(text_parts)
+
+        data = {"data": content}
+        if session_id:
+            data["session_id"] = session_id
+        if delay_ms is not None:
+            data["line_delay_ms"] = delay_ms
+        if raw_mode:
+            data["raw"] = True
+
+        print_result(request("/api/send", "POST", data))
+
+    elif cmd == "exec":
+        if len(args) < 2:
+            print("Kullanım: ./smp exec <komut> [--timeout ms] [--expect text] [--delay ms] [--json]")
+            sys.exit(1)
+        timeout_ms = 2500
+        expect_str = None
+        delay_ms = None
+        session_id = None
+        json_output = False
+        text_parts = []
+        i = 1
+        while i < len(args):
+            a = args[i]
+            if a in ("--timeout", "-t") and i + 1 < len(args):
+                timeout_ms = int(args[i + 1])
+                i += 2
+            elif a in ("--expect", "-e") and i + 1 < len(args):
+                expect_str = args[i + 1]
+                i += 2
+            elif a in ("--delay", "-d") and i + 1 < len(args):
+                delay_ms = int(args[i + 1])
+                i += 2
+            elif a in ("--session", "-s") and i + 1 < len(args):
+                session_id = args[i + 1]
+                i += 2
+            elif a == "--json":
+                json_output = True
+                i += 1
+            else:
+                text_parts.append(a)
+                i += 1
+
+        cmd_text = " ".join(text_parts)
+        req_payload = {
+            "command": cmd_text,
+            "timeout_ms": timeout_ms
+        }
+        if expect_str:
+            req_payload["expect"] = expect_str
+        if delay_ms is not None:
+            req_payload["line_delay_ms"] = delay_ms
+        if session_id:
+            req_payload["session_id"] = session_id
+
+        res = request("/api/exec", "POST", req_payload)
+        if json_output:
+            print_result(res)
+        else:
+            if isinstance(res, dict) and res.get("ok"):
+                lines = res.get("response_lines", [])
+                if lines:
+                    print("\n".join(lines))
+                else:
+                    print(f"(Cihazdan yanıt satırı gelmedi - {res.get('duration_ms', 0)}ms)")
+            else:
+                print_result(res)
+
+    elif cmd in ("shell", "sh"):
+        if len(args) < 2:
+            print("Kullanım: ./smp shell <komut> [--cwd dizin]")
+            sys.exit(1)
+        cwd = None
+        text_parts = []
+        i = 1
+        while i < len(args):
+            if args[i] in ("--cwd", "-C") and i + 1 < len(args):
+                cwd = args[i + 1]
+                i += 2
+            else:
+                text_parts.append(args[i])
+                i += 1
+        shell_cmd = " ".join(text_parts)
+        payload = {"command": shell_cmd}
+        if cwd:
+            payload["cwd"] = cwd
+        res = request("/api/shell", "POST", payload)
+        if isinstance(res, dict) and "stdout" in res:
+            if res.get("stdout"):
+                sys.stdout.write(res["stdout"])
+            if res.get("stderr"):
+                sys.stderr.write(res["stderr"])
+            sys.exit(res.get("exit_code", 0))
+        else:
+            print_result(res)
+
+    elif cmd in ("logs", "log"):
+        tail = 50
+        filter_term = ""
+        session_id = None
+        i = 1
+        while i < len(args):
+            if args[i] in ("--tail", "-n") and i + 1 < len(args):
+                tail = int(args[i + 1])
+                i += 2
+            elif args[i] in ("--filter", "-f") and i + 1 < len(args):
+                filter_term = args[i + 1]
+                i += 2
+            elif args[i] in ("--session", "-s") and i + 1 < len(args):
+                session_id = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        query = f"?tail={tail}"
+        if filter_term:
+            query += f"&filter={urllib.parse.quote(filter_term)}"
+        if session_id:
+            query += f"&session_id={urllib.parse.quote(session_id)}"
+        print_result(request(f"/api/logs{query}"))
+
+    elif cmd == "reset":
+        session_id = args[1] if len(args) > 1 and not args[1].startswith("-") else None
+        data = {"session_id": session_id} if session_id else {}
+        print_result(request("/api/reset", "POST", data))
+
+    elif cmd == "boot":
+        session_id = args[1] if len(args) > 1 and not args[1].startswith("-") else None
+        data = {"session_id": session_id} if session_id else {}
+        print_result(request("/api/boot", "POST", data))
+
+    elif cmd == "pin":
+        line_idx = -1
+        i = 1
+        if len(args) > 1:
+            first_arg = args[1]
+            if first_arg.isdigit():
+                val = int(first_arg)
+                line_idx = max(0, val - 1)
+                i = 2
+            elif first_arg.lower() in ("last", "son", "-1"):
+                line_idx = -1
+                i = 2
+            elif not first_arg.startswith("-"):
+                # E.g. ./smp pin "cızırtı duyuldu" --preset 2
+                line_idx = -1
+                i = 1
+            else:
+                # E.g. ./smp pin --preset 1
+                line_idx = -1
+                i = 1
+
+        note_words = []
+        preset_id = None
+        shape = None
+        color = None
+        emoji = None
+        desc = None
+        session_id = None
+
+        while i < len(args):
+            arg = args[i]
+            if arg in ("--preset", "-p") and i + 1 < len(args):
+                preset_id = args[i + 1]
+                i += 2
+            elif arg == "--shape" and i + 1 < len(args):
+                shape = args[i + 1]
+                i += 2
+            elif arg == "--color" and i + 1 < len(args):
+                color = args[i + 1]
+                i += 2
+            elif arg == "--emoji" and i + 1 < len(args):
+                emoji = args[i + 1]
+                i += 2
+            elif arg in ("--desc", "--description") and i + 1 < len(args):
+                desc = args[i + 1]
+                i += 2
+            elif arg in ("--session", "-s") and i + 1 < len(args):
+                session_id = args[i + 1]
+                i += 2
+            else:
+                note_words.append(arg)
+                i += 1
+
+        note = " ".join(note_words)
+        pin_payload = {"line_index": line_idx}
+        if note:
+            pin_payload["note"] = note
+        if session_id:
+            pin_payload["session_id"] = session_id
+
+        if preset_id and preset_id in DEFAULT_PRESETS:
+            p = DEFAULT_PRESETS[preset_id]
+            pin_payload["shape"] = shape or p["shape"]
+            pin_payload["color"] = color or p["color"]
+            pin_payload["emoji"] = emoji or p["emoji"]
+            pin_payload["description"] = desc or note or p["description"]
+            pin_payload["key"] = preset_id
+        else:
+            if shape:
+                pin_payload["shape"] = shape
+            if color:
+                pin_payload["color"] = color
+            if emoji:
+                pin_payload["emoji"] = emoji
+            if desc:
+                pin_payload["description"] = desc
+
+        print_result(request("/api/pin", "POST", pin_payload))
+
+    elif cmd == "pins":
+        print_result(request("/api/pins"))
+
+    elif cmd in ("pin-remove", "unpin"):
+        if len(args) < 2:
+            print("Kullanım: ./smp pin-remove <pin_id_veya_satır_no>")
+            sys.exit(1)
+        target = args[1]
+        data = {}
+        if target.isdigit():
+            data["line_index"] = int(target) - 1
+        else:
+            data["pin_id"] = target
+        print_result(request("/api/pin", "DELETE", data))
+
+    elif cmd == "filter":
+        if len(args) < 2:
+            print("Kullanım: ./smp filter <add|remove|clear> [kelimeler...]")
+            sys.exit(1)
+        sub = args[1].lower()
+        if sub == "clear":
+            print_result(request("/api/filter", "POST", {"action": "clear", "tags": []}))
+        elif sub in ("add", "remove"):
+            raw = " ".join(args[2:])
+            tags = [t.strip() for t in raw.split(",") if t.strip()]
+            print_result(request("/api/filter", "POST", {"action": sub, "tags": tags}))
+        else:
+            raw = " ".join(args[1:])
+            tags = [t.strip() for t in raw.split(",") if t.strip()]
+            print_result(request("/api/filter", "POST", {"action": "add", "tags": tags}))
+
+    elif cmd == "trigger":
+        if len(args) < 2:
+            print("Kullanım: ./smp trigger <add|remove|clear> [kelime]")
+            sys.exit(1)
+        sub = args[1].lower()
+        if sub == "clear":
+            print_result(request("/api/trigger", "POST", {"action": "clear", "tags": []}))
+        else:
+            tags = [args[2].strip()] if len(args) > 2 else [args[1].strip()]
+            print_result(request("/api/trigger", "POST", {"action": "add", "tags": tags}))
+
+    elif cmd == "archives":
+        print_result(request("/api/archives"))
+
+    elif cmd in ("ai-logs", "ailogs"):
+        print_result(request("/api/ai-logs"))
+
+    else:
+        print(f"Bilinmeyen komut: '{cmd}'. Komut listesi ve AI yetenek kılavuzu için: ./smp help", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -12,6 +12,17 @@ use serialport::{SerialPort, SerialPortType};
 use tauri::{AppHandle, Emitter};
 
 use crate::archive::get_archive_dir;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveSessionInfo {
+    pub session_id: String,
+    pub port_name: String,
+    pub baud_rate: u32,
+    pub is_running: bool,
+    pub rx_bytes: usize,
+    pub tx_bytes: usize,
+    pub lines_count: usize,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerialDeviceInfo {
@@ -51,6 +62,8 @@ pub struct ActiveSession {
     pub port_writer: Arc<Mutex<Option<Box<dyn SerialPort>>>>,
     pub rx_bytes: Arc<AtomicUsize>,
     pub tx_bytes: Arc<AtomicUsize>,
+    pub recent_lines: Arc<Mutex<VecDeque<String>>>,
+    pub total_lines_received: Arc<AtomicUsize>,
 }
 
 #[derive(Default)]
@@ -196,6 +209,8 @@ impl SerialManager {
         let is_running = Arc::new(AtomicBool::new(true));
         let rx_bytes = Arc::new(AtomicUsize::new(0));
         let tx_bytes = Arc::new(AtomicUsize::new(0));
+        let recent_lines = Arc::new(Mutex::new(VecDeque::with_capacity(1000)));
+        let total_lines_received = Arc::new(AtomicUsize::new(0));
 
         let writer_mutex = Arc::new(Mutex::new(Some(port_writer)));
 
@@ -207,6 +222,8 @@ impl SerialManager {
             port_writer: writer_mutex.clone(),
             rx_bytes: rx_bytes.clone(),
             tx_bytes: tx_bytes.clone(),
+            recent_lines: recent_lines.clone(),
+            total_lines_received: total_lines_received.clone(),
         };
 
         {
@@ -265,6 +282,8 @@ impl SerialManager {
         let running_flag = is_running.clone();
         let rx_counter = rx_bytes.clone();
         let tx_counter = tx_bytes.clone();
+        let lines_queue = recent_lines.clone();
+        let total_lines_counter = total_lines_received.clone();
 
         thread::spawn(move || {
             let mut reader = BufReader::new(port);
@@ -275,11 +294,22 @@ impl SerialManager {
                 match reader.read_line(&mut line_buffer) {
                     Ok(bytes_read) => {
                         if bytes_read > 0 {
+                            total_lines_counter.fetch_add(1, Ordering::SeqCst);
                             let total_rx = rx_counter.fetch_add(bytes_read, Ordering::SeqCst) + bytes_read;
                             let total_tx = tx_counter.load(Ordering::SeqCst);
 
                             // Clean line of trailing CRLF for UI, but preserve raw log
                             let trimmed = line_buffer.trim_end_matches(['\r', '\n']).to_string();
+
+                            // Store in recent lines ring buffer
+                            {
+                                if let Ok(mut q) = lines_queue.lock() {
+                                    if q.len() >= 1000 {
+                                        q.pop_front();
+                                    }
+                                    q.push_back(trimmed.clone());
+                                }
+                            }
 
                             // Write to archive
                             if let Some(ref mut f) = archive_file {
@@ -348,6 +378,56 @@ impl SerialManager {
         Err("Bağlantı aktif değil".to_string())
     }
 
+    pub fn send_multiline(
+        &self,
+        session_id: &str,
+        lines: &[String],
+        eol: &str,
+        delay_ms: u64,
+    ) -> Result<usize, String> {
+        let map = self.sessions.lock().unwrap();
+        if let Some(session) = map.get(session_id) {
+            let mut writer = session.port_writer.lock().unwrap();
+            if let Some(ref mut port) = *writer {
+                let mut total_bytes = 0;
+                let count = lines.len();
+                for (idx, line) in lines.iter().enumerate() {
+                    let formatted = format!("{}{}", line, eol);
+                    let bytes = formatted.as_bytes();
+                    port.write_all(bytes).map_err(|e| format!("Veri yazma hatası: {}", e))?;
+                    session.tx_bytes.fetch_add(bytes.len(), Ordering::SeqCst);
+                    total_bytes += bytes.len();
+
+                    if delay_ms > 0 && idx + 1 < count {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                }
+                return Ok(total_bytes);
+            }
+        }
+        Err("Bağlantı aktif değil".to_string())
+    }
+
+    pub fn get_total_lines_count(&self, session_id: &str) -> Option<usize> {
+        let map = self.sessions.lock().unwrap();
+        map.get(session_id).map(|s| s.total_lines_received.load(Ordering::SeqCst))
+    }
+
+    pub fn get_lines_since(&self, session_id: &str, start_count: usize) -> Vec<String> {
+        let map = self.sessions.lock().unwrap();
+        if let Some(session) = map.get(session_id) {
+            let current_count = session.total_lines_received.load(Ordering::SeqCst);
+            if current_count <= start_count {
+                return Vec::new();
+            }
+            let diff = current_count - start_count;
+            let q = session.recent_lines.lock().unwrap();
+            let available = diff.min(q.len());
+            return q.iter().rev().take(available).cloned().collect::<Vec<_>>().into_iter().rev().collect();
+        }
+        Vec::new()
+    }
+
     pub fn reset_esp(&self, session_id: &str) -> Result<(), String> {
         let map = self.sessions.lock().unwrap();
         if let Some(session) = map.get(session_id) {
@@ -378,6 +458,55 @@ impl SerialManager {
             }
         }
         Err("Bağlantı aktif değil".to_string())
+    }
+
+    pub fn get_recent_lines(&self, session_id: Option<&str>, tail: usize) -> Vec<String> {
+        let map = self.sessions.lock().unwrap();
+        if let Some(s_id) = session_id {
+            if let Some(session) = map.get(s_id) {
+                let q = session.recent_lines.lock().unwrap();
+                let count = tail.min(q.len());
+                return q.iter().rev().take(count).cloned().collect::<Vec<_>>().into_iter().rev().collect();
+            }
+        }
+        // Fallback: take from first session
+        if let Some((_, session)) = map.iter().next() {
+            let q = session.recent_lines.lock().unwrap();
+            let count = tail.min(q.len());
+            return q.iter().rev().take(count).cloned().collect::<Vec<_>>().into_iter().rev().collect();
+        }
+        Vec::new()
+    }
+
+    pub fn get_active_sessions_info(&self) -> Vec<ActiveSessionInfo> {
+        let map = self.sessions.lock().unwrap();
+        map.values().map(|s| ActiveSessionInfo {
+            session_id: s.session_id.clone(),
+            port_name: s.port_name.clone(),
+            baud_rate: s.baud_rate,
+            is_running: s.is_running.load(Ordering::SeqCst),
+            rx_bytes: s.rx_bytes.load(Ordering::SeqCst),
+            tx_bytes: s.tx_bytes.load(Ordering::SeqCst),
+            lines_count: s.recent_lines.lock().unwrap().len(),
+        }).collect()
+    }
+
+    pub fn get_first_session_id(&self) -> Option<String> {
+        let map = self.sessions.lock().unwrap();
+        map.keys().next().cloned()
+    }
+
+    pub fn get_lines_count(&self, session_id: Option<&str>) -> usize {
+        let map = self.sessions.lock().unwrap();
+        if let Some(s_id) = session_id {
+            if let Some(session) = map.get(s_id) {
+                return session.recent_lines.lock().unwrap().len();
+            }
+        }
+        if let Some((_, session)) = map.iter().next() {
+            return session.recent_lines.lock().unwrap().len();
+        }
+        0
     }
 }
 
