@@ -25,16 +25,17 @@ DEFAULT_PRESETS = {
 
 FALLBACK_SKILL_DOC = """# 🤖 Serial Monitor Pro - AI Agent Skill Guide
 
-Serial Monitor Pro provides an autonomous Headless REST API and CLI tool (`./smp`) for AI agents, LLMs, and terminal scripts to interact with embedded UART hardware (ESP32, Arduino, STM32, Pico).
+Serial Monitor Pro provides an autonomous Headless REST API and CLI tool (`smp` or `./smp`) for AI agents, LLMs, and terminal scripts to interact with embedded UART hardware (ESP32, Arduino, STM32, Pico).
+*Note: `smp` is installed to system PATH (`~/.local/bin/smp`) automatically on startup, so you can execute `smp <command>` directly from ANY working directory.*
 
 ## 📡 Base URL
-`http://127.0.0.1:4567` (or execute commands via `./smp <command>`)
+`http://127.0.0.1:4567` (or execute commands via `smp <command>`)
 
 ---
 
 ## 🛠️ Commands & Tool Endpoints
 
-### 1. `GET /api/status` (or `./smp status`)
+### 1. `GET /api/status` (or `smp status`)
 Returns the complete state of the serial monitor:
 - Active panels & open ports
 - Connected AI models & their operating ports
@@ -42,72 +43,70 @@ Returns the complete state of the serial monitor:
 - RX / TX byte counts & line counts
 - Active filters, triggers, and pins count
 
-### 2. `GET /api/ports` (or `./smp ports`)
+### 2. `GET /api/ports` (or `smp ports`)
 Scans host USB/UART ports. Identifies ESP32, Arduino, CH340, CP2102, FTDI chips with VID/PID and category.
 
-### 3. `POST /api/connect` (or `./smp connect <port> [baud] [--reset]`)
-Connects to a serial port.
-### 3. `POST /api/connect` (or `./smp connect [port|"auto"] [baud] [--reset]`)
+### 3. `POST /api/connect` (or `smp connect [port|"auto"] [baud] [--reset]`)
 Connects to a serial port.
 - JSON body: `{"port": "auto"|"/dev/ttyUSB0", "baud": 115200, "reset": false}`
 - When omitted or "auto", automatically finds and connects to the connected ESP32/UART device!
 - If already connected, gracefully returns the existing session.
 
-### 4. `POST /api/disconnect` (or `./smp disconnect [session_id]`)
+### 4. `POST /api/disconnect` (or `smp disconnect [session_id]`)
 Disconnects the port cleanly.
 - JSON body: `{"session_id": "session_xxx"}` (or empty for default session).
 
-### 5. `GET /api/logs` (or `./smp logs [--tail N] [--filter <term>]`)
+### 5. `GET /api/logs` (or `smp logs [--tail N] [--filter <term>]`)
 Fetches the latest N log lines from the device.
 - Query params: `tail=50`, `filter=HEAP`, `session_id=...`
 - Context window filtering: `--filter "tag+5"` shows tagged lines plus 5 context lines before and after!
 - Returns: `{"lines": ["line 1", "line 2", ...], "count": 50}`
 
-### 6. `POST /api/send` (or `./smp send <command> [--delay ms] [--raw] [-f file]`)
+### 6. `POST /api/send` (or `smp send <command> [--delay ms] [--raw] [-f file]`)
 Sends single-line or multiline UART data to the connected device.
 - JSON body: `{"data": "...", "line_delay_ms": 30, "raw": false}`
-- Can send files (`-f script.py`) or read from stdin (`cat code.py | ./smp send -`).
+- Can send files (`-f script.py`) or read from stdin (`cat code.py | smp send -`).
 
-### 7. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
+### 7. `POST /api/exec` (or `smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
 **⚡ Interactive Serial Execution**: Sends command, waits for device response lines, and prints them immediately!
 - JSON body: `{"command": "help", "timeout_ms": 2500, "expect": ">>>", "line_delay_ms": 30}`
 
-### 8. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
+### 8. `POST /api/shell` (or `smp shell <command>` / `smp sh <command>`)
 **💻 Cross-Platform Local Shell Execution**: Runs local shell command (Windows PowerShell / Linux bash/sh).
 - JSON body: `{"command": "idf.py build", "cwd": "/path"}`
 
-### 9. `POST /api/reset` (or `./smp reset`)
+### 9. `POST /api/reset` (or `smp reset`)
 Executes an ESP32 Hardware Reset by pulsing the EN line.
 
-### 10. `POST /api/boot` (or `./smp boot`)
+### 10. `POST /api/boot` (or `smp boot`)
 Forces the ESP32 into ROM Bootloader / Download Mode (IO0 low + EN pulse).
 
-### 11. `POST /api/pin` (or `./smp pin [line_index|"last"] [note] [--preset 1-6]`)
+### 11. `POST /api/pin` (or `smp pin [line_index|"last"] [note] [--preset 1-6]`)
 Tags and bookmarks a log line (or latest line if omitted or "last") with shape, color, emoji, and note.
 - Omit line number or use `last` to tag the latest received serial line instantly during testing!
 - Presets: 1: 😡 ekran hatası, 2: 🔊 cızırtı, 3: ⚠️ donanım uyarısı, 4: ✅ başarılı test, 5: ⚡ voltaj dalgalanması, 6: 🐛 bellek sızıntısı.
 
-### 12. `GET /api/pins` (or `./smp pins`)
+### 12. `GET /api/pins` (or `smp pins`)
 Lists all bookmarked pins and notes across panels.
 
-### 13. `DELETE /api/pin` (or `./smp pin remove <id>`)
+### 13. `DELETE /api/pin` (or `smp pin remove <id>`)
 Removes a pin by ID or line index.
 
-### 14. `POST /api/filter` (or `./smp filter add <tags...>`)
+### 14. `POST /api/filter` (or `smp filter add <tags...>`)
 Adds or removes filter tags in the UI.
 - JSON body: `{"action": "add"|"remove"|"clear", "tags": ["HEAP", "Guru Meditation"]}`
 - Supports tag context windows: `tag+5`, `tag+-5`, `tag:ekran hatası+3`
 
-### 15. `POST /api/trigger` (or `./smp trigger add <tag>`)
+### 15. `POST /api/trigger` (or `smp trigger add <tag>`)
 Sets an armed target trigger word.
 
-### 16. `GET /api/archives` (or `./smp archives`)
+### 16. `GET /api/archives` (or `smp archives`)
 Lists all recorded session log archives on local disk.
 
-### 17. `GET /api/ai-logs` (or `./smp ai-logs`)
+### 17. `GET /api/ai-logs` (or `smp ai-logs`)
 Returns the audit trail of all commands executed by AI models, visible live in the UI.
 
-### 18. `GET /api/ai-models` (or `./smp ai-models`)
+### 18. `GET /api/ai-models` (or `smp ai-models`)
 Cross-model peer visibility: lists connected AI models, their active ports, sessions, and last activity.
 - Agents can supply headers `X-AI-Model: <name>` and `X-AI-Client: <id>` or environment variable `AI_MODEL`.
 
@@ -116,17 +115,17 @@ Cross-model peer visibility: lists connected AI models, their active ports, sess
 ## 💡 Quick Examples (cURL or CLI):
 ```bash
 # Auto-connect to plugged ESP32
-./smp connect auto
+smp connect auto
 # Interactive query: send command and print device response immediately!
-./smp exec "help"
+smp exec "help"
 # Send multiline script with 30ms inter-line delay
-./smp send -f script.py --delay 30
+smp send -f script.py --delay 30
 # Run local shell tool (Windows/Linux)
-./smp shell "esptool.py chip_id"
+smp shell "esptool.py chip_id"
 # Read logs with tag context window (+- 5 lines)
-./smp logs --filter "tag+5"
+smp logs --filter "tag+5"
 # Tag a crash line with preset 1
-./smp pin --preset 1
+smp pin --preset 1
 ```
 """
 

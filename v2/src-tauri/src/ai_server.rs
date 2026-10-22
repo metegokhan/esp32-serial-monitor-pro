@@ -65,10 +65,11 @@ pub struct AiServerState {
 
 pub const AI_SKILL_DOCUMENT: &str = r##"# 🤖 Serial Monitor Pro - AI Agent Skill Guide
 
-Serial Monitor Pro provides an autonomous Headless REST API and CLI tool (`./smp`) for AI agents, LLMs, and terminal scripts to interact with embedded UART hardware (ESP32, Arduino, STM32, Pico).
+Serial Monitor Pro provides an autonomous Headless REST API and CLI tool (`smp` or `./smp`) for AI agents, LLMs, and terminal scripts to interact with embedded UART hardware (ESP32, Arduino, STM32, Pico).
+*Note: `smp` is installed to system PATH (`~/.local/bin/smp`) automatically on startup, so you can execute `smp <command>` directly from ANY working directory.*
 
 ## 📡 Base URL
-`http://127.0.0.1:4567` (or execute commands via `./smp <command>`)
+`http://127.0.0.1:4567` (or execute commands via `smp <command>`)
 
 ---
 
@@ -157,17 +158,17 @@ Cross-model peer visibility: lists connected AI models, their active ports, sess
 ## 💡 Quick Examples (cURL or CLI):
 ```bash
 # Auto-connect to plugged ESP32
-./smp connect auto
+smp connect auto
 # Interactive query: send command and print device response immediately!
-./smp exec "help"
+smp exec "help"
 # Send multiline MicroPython script with 30ms delay
-./smp send -f script.py --delay 30
+smp send -f script.py --delay 30
 # Run local shell tool (e.g. esptool or idf)
-./smp shell "esptool.py chip_id"
+smp shell "esptool.py chip_id"
 # Read logs with tag context window (+- 5 lines)
-./smp logs --filter "tag+5"
+smp logs --filter "tag+5"
 # Tag a crash line with preset 1
-./smp pin --preset 1
+smp pin --preset 1
 ```
 "##;
 

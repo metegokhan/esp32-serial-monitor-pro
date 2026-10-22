@@ -1,5 +1,6 @@
 pub mod ai_server;
 pub mod archive;
+pub mod cli_installer;
 pub mod gdrive_oauth;
 pub mod serial;
 pub mod shell;
@@ -217,6 +218,16 @@ fn get_ai_skill_guide() -> String {
     ai_server::AI_SKILL_DOCUMENT.to_string()
 }
 
+#[tauri::command]
+fn install_smp_cli_cmd() -> cli_installer::SmpInstallResult {
+    cli_installer::install_smp_cli()
+}
+
+#[tauri::command]
+fn get_smp_cli_status_cmd() -> cli_installer::SmpInstallResult {
+    cli_installer::get_smp_cli_status()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let serial_manager = Arc::new(SerialManager::new());
@@ -226,6 +237,14 @@ pub fn run() {
         .manage(serial_manager)
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
+            // Automatically ensure smp CLI tool is installed to user's PATH (~/.local/bin/smp)
+            let install_res = cli_installer::install_smp_cli();
+            if install_res.ok {
+                println!("[SMP] CLI tool installed: {}", install_res.target_path);
+            } else {
+                eprintln!("[SMP] CLI install warning: {}", install_res.message);
+            }
+
             // Start headless AI agent HTTP server on 127.0.0.1:4567
             ai_server::start_ai_http_server(app.handle().clone(), sm_for_server);
             Ok(())
@@ -249,6 +268,8 @@ pub fn run() {
             start_google_oauth_flow,
             refresh_google_oauth_token,
             get_ai_skill_guide,
+            install_smp_cli_cmd,
+            get_smp_cli_status_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

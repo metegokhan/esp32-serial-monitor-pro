@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { AiCommandLog, I18nLanguage, AiModelClient } from './types';
 import {
   Bot,
@@ -13,7 +14,15 @@ import {
   BookOpen,
   Search,
   Radio,
+  Loader2,
 } from 'lucide-react';
+
+interface SmpCliStatus {
+  ok: boolean;
+  target_path: string;
+  in_path: boolean;
+  message: string;
+}
 
 interface AiActivityModalProps {
   isOpen: boolean;
@@ -42,6 +51,29 @@ export const AiActivityModal: React.FC<AiActivityModalProps> = ({
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [promptLang, setPromptLang] = useState<'tr' | 'en'>(lang);
   const [showPromptBanner, setShowPromptBanner] = useState(true);
+  const [smpStatus, setSmpStatus] = useState<SmpCliStatus | null>(null);
+  const [isInstallingSmp, setIsInstallingSmp] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      invoke<SmpCliStatus>('get_smp_cli_status_cmd')
+        .then((res) => setSmpStatus(res))
+        .catch((err) => console.error('Failed to get smp status:', err));
+    }
+  }, [isOpen]);
+
+  const handleInstallSmp = async () => {
+    setIsInstallingSmp(true);
+    try {
+      const res = await invoke<SmpCliStatus>('install_smp_cli_cmd');
+      setSmpStatus(res);
+      onNotification(res.message);
+    } catch (err) {
+      onNotification(lang === 'tr' ? `smp kurulum hatası: ${err}` : `smp install error: ${err}`);
+    } finally {
+      setIsInstallingSmp(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -59,8 +91,8 @@ export const AiActivityModal: React.FC<AiActivityModalProps> = ({
   });
 
   const handleCopyCliCommand = () => {
-    navigator.clipboard.writeText('./smp');
-    onNotification(lang === 'tr' ? './smp panoya kopyalandı.' : './smp copied to clipboard.');
+    navigator.clipboard.writeText('smp');
+    onNotification(lang === 'tr' ? 'smp komutu panoya kopyalandı.' : 'smp command copied to clipboard.');
   };
 
   const handleCopyIp = (e?: React.MouseEvent) => {
@@ -82,40 +114,40 @@ ESP32 / UART donanım loglarını izlemek, donanımı yönetmek ve komut çalı�
 
 📡 BAĞLANTI & SKILL KAYNAĞI:
 - API Adresi: http://127.0.0.1:4567
-- CLI Aracı: ./smp (veya curl ile REST API)
-- Tam Yetenek & Skill Rehberi: \`./smp help\` veya \`curl -s http://127.0.0.1:4567/api/skill\`
+- CLI Aracı: smp (Sistem PATH'ine kuruludur; herhangi bir çalışma dizininden doğrudan 'smp' olarak çağrılabilir; veya repo içinde './smp')
+- Tam Yetenek & Skill Rehberi: \`smp help\` veya \`curl -s http://127.0.0.1:4567/api/skill\`
 
 ⚡ HIZLI BAŞLANGIÇ KOMUTLARI:
-1. Donanıma Otomatik Bağlan: \`./smp connect auto\` (takılı ESP32/UART cihazını otomatik bulur ve bağlanır)
-2. İnteraktif Komut & Yanıt: \`./smp exec "<komut>"\` (komutu cihaza yollar ve cihazın yanıtını doğrudan döndürür)
-3. Canlı Logları Oku: \`./smp logs --tail 50\` veya \`./smp logs --filter "HEAP"\`
-4. Betik / Çok Satırlı Kod Yolla: \`./smp send -f script.py --delay 50\`
-5. Yerel Kabuk Komutları: \`./smp shell "<komut>"\` (Linux: bash, Windows: powershell)
-6. Teşhis Satırını Pinle/Etiketle: \`./smp pin last "Kritik Hata"\` veya \`./smp pin --preset 1\`
-7. Donanım & Oturum Durumu: \`./smp status\`
-8. Donanımsal Reset: \`./smp reset\` | Bootloader: \`./smp boot\`
+1. Donanıma Otomatik Bağlan: \`smp connect auto\` (takılı ESP32/UART cihazını otomatik bulur ve bağlanır)
+2. İnteraktif Komut & Yanıt: \`smp exec "<komut>"\` (komutu cihaza yollar ve cihazın yanıtını doğrudan döndürür)
+3. Canlı Logları Oku: \`smp logs --tail 50\` veya \`smp logs --filter "HEAP"\`
+4. Betik / Çok Satırlı Kod Yolla: \`smp send -f script.py --delay 50\`
+5. Yerel Kabuk Komutları: \`smp shell "<komut>"\` (Linux: bash, Windows: powershell)
+6. Teşhis Satırını Pinle/Etiketle: \`smp pin last "Kritik Hata"\` veya \`smp pin --preset 1\`
+7. Donanım & Oturum Durumu: \`smp status\`
+8. Donanımsal Reset: \`smp reset\` | Bootloader: \`./smp boot\`
 
-Çalışmaya başlarken önce \`./smp status\` ve \`./smp help\` ile mevcut donanım ortamını doğrula.`;
+Çalışmaya başlarken önce \`smp status\` ve \`smp help\` ile mevcut donanım ortamını doğrula.`;
     }
     return `You are an embedded systems AI agent working with Serial Monitor Pro.
 You can monitor ESP32/UART hardware logs, inspect diagnostics, and execute commands using the local API and CLI.
 
 📡 CONNECTION & SKILL SOURCE:
 - API Base: http://127.0.0.1:4567
-- CLI Tool: ./smp (or curl REST endpoints)
-- Full Skill Guide: \`./smp help\` or \`curl -s http://127.0.0.1:4567/api/skill\`
+- CLI Tool: smp (Installed in system PATH; can be executed directly as 'smp' from any directory; or './smp' in repo)
+- Full Skill Guide: \`smp help\` or \`curl -s http://127.0.0.1:4567/api/skill\`
 
 ⚡ QUICK START COMMANDS:
-1. Auto-Connect to Device: \`./smp connect auto\` (auto-detects plugged ESP32/UART hardware)
-2. Interactive Exec: \`./smp exec "<command>"\` (sends command and immediately returns device response lines)
-3. Read Live Logs: \`./smp logs --tail 50\` or \`./smp logs --filter "HEAP"\`
-4. Send Script / Multiline: \`./smp send -f script.py --delay 50\`
-5. Host Shell Commands: \`./smp shell "<cmd>"\` (Linux: bash, Windows: powershell)
-6. Pin/Tag Line: \`./smp pin last "Critical error"\` or \`./smp pin --preset 1\`
-7. Inspect Status: \`./smp status\`
-8. Hardware Reset: \`./smp reset\` | Bootloader: \`./smp boot\`
+1. Auto-Connect to Device: \`smp connect auto\` (auto-detects plugged ESP32/UART hardware)
+2. Interactive Exec: \`smp exec "<command>"\` (sends command and immediately returns device response lines)
+3. Read Live Logs: \`smp logs --tail 50\` or \`smp logs --filter "HEAP"\`
+4. Send Script / Multiline: \`smp send -f script.py --delay 50\`
+5. Host Shell Commands: \`smp shell "<cmd>"\` (Linux: bash, Windows: powershell)
+6. Pin/Tag Line: \`smp pin last "Critical error"\` or \`smp pin --preset 1\`
+7. Inspect Status: \`smp status\`
+8. Hardware Reset: \`smp reset\` | Bootloader: \`smp boot\`
 
-When starting, inspect \`./smp status\` and \`./smp help\` to verify connected hardware and available capabilities.`;
+When starting, inspect \`smp status\` and \`smp help\` to verify connected hardware and available capabilities.`;
   };
 
   const handleCopyAiPrompt = (e?: React.MouseEvent) => {
@@ -166,7 +198,7 @@ When starting, inspect \`./smp status\` and \`./smp help\` to verify connected h
             </button>
 
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm font-bold text-white tracking-wide">
                   {lang === 'tr' ? 'AI Agent & Terminal Komut Konsolu' : 'AI Agent & Terminal Command Console'}
                 </h2>
@@ -192,11 +224,35 @@ When starting, inspect \`./smp status\` and \`./smp help\` to verify connected h
                     <Copy className="w-3 h-3 opacity-70 group-hover:opacity-100" />
                   )}
                 </button>
+
+                {/* smp CLI PATH Status & Install Badge */}
+                <button
+                  onClick={handleInstallSmp}
+                  disabled={isInstallingSmp}
+                  title={
+                    lang === 'tr'
+                      ? `smp CLI Aracı: ${smpStatus?.in_path ? 'PATH\'te hazır' : smpStatus?.ok ? 'Kurulu (~/.local/bin/smp)' : 'Kuruluyor...'}\nTıkla: PATH'e yeniden bağla/yükle`
+                      : `smp CLI Tool: ${smpStatus?.in_path ? 'Ready in PATH' : smpStatus?.ok ? 'Installed' : 'Installing...'}\nClick: Re-install / sync to PATH`
+                  }
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1.5 transition cursor-pointer select-none ${
+                    smpStatus?.in_path
+                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30 hover:border-cyan-400 hover:text-white'
+                      : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40 hover:bg-indigo-500/30 hover:border-indigo-400 hover:text-white'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${smpStatus?.in_path ? 'bg-cyan-400' : 'bg-amber-400 animate-pulse'}`} />
+                  <span className="font-mono">smp CLI (PATH)</span>
+                  {isInstallingSmp ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-cyan-300" />
+                  ) : (
+                    <Check className="w-3 h-3 text-cyan-300" />
+                  )}
+                </button>
               </div>
               <p className="text-[11px] text-[#6c7086]">
                 {lang === 'tr'
-                  ? 'Harici AI modelleri ve terminal betikleri tarafından `./smp` veya HTTP API ile yürütülen canlı komutlar'
-                  : 'Live commands executed by external AI models & terminal scripts via `./smp` or HTTP API'}
+                  ? 'Harici AI modelleri ve terminal betikleri tarafından `smp` veya HTTP API ile yürütülen canlı komutlar'
+                  : 'Live commands executed by external AI models & terminal scripts via `smp` or HTTP API'}
               </p>
             </div>
           </div>
@@ -295,14 +351,18 @@ When starting, inspect \`./smp status\` and \`./smp help\` to verify connected h
             <div className="flex items-center justify-between pb-3 border-b border-[#25283b]">
               <div>
                 <h3 className="text-sm font-bold text-white">🤖 AI Agent Skill & Headless API</h3>
-                <p className="text-[11px] text-[#6c7086]">Terminalden `./smp` komutunu veya `curl http://127.0.0.1:4567/api/...` çağrısını kullanarak tüm sistemi kontrol edin.</p>
+                <p className="text-[11px] text-[#6c7086]">
+                  {lang === 'tr'
+                    ? 'Sistem genelinde `smp` komutunu veya `curl http://127.0.0.1:4567/api/...` çağrısını kullanarak donanımı kontrol edin.'
+                    : 'Control hardware globally via `smp` command or `curl http://127.0.0.1:4567/api/...`.'}
+                </p>
               </div>
               <button
                 onClick={handleCopyCliCommand}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs transition cursor-pointer"
               >
                 <Copy className="w-3 h-3" />
-                <span>./smp kopyala</span>
+                <span>smp kopyala</span>
               </button>
             </div>
 
@@ -310,21 +370,21 @@ When starting, inspect \`./smp status\` and \`./smp help\` to verify connected h
               <div className="text-emerald-400 font-bold"># Hızlı Kullanım Örnekleri (Terminal / AI Subagent):</div>
               <div className="bg-[#090a10] p-3 rounded-lg border border-[#25283b] space-y-2 text-[11px]">
                 <div><span className="text-[#6c7086]"># 1. Cihaz ve Port Durumunu Sorgula</span></div>
-                <div className="text-cyan-300">./smp status</div>
+                <div className="text-cyan-300">smp status</div>
                 <div><span className="text-[#6c7086]"># 2. Portları Tara (ESP32, Arduino otomatik bulunur)</span></div>
-                <div className="text-cyan-300">./smp ports</div>
-                <div><span className="text-[#6c7086]"># 3. Porta Bağlan (Opsiyonel: --reset ile boot logu yakala)</span></div>
-                <div className="text-cyan-300">./smp connect /dev/ttyUSB0 115200 --reset</div>
-                <div><span className="text-[#6c7086]"># 4. Son 20 Satır Logu Oku (Opsiyonel: filtre ile)</span></div>
-                <div className="text-cyan-300">./smp logs --tail 20 --filter "HEAP"</div>
-                <div><span className="text-[#6c7086]"># 5. Kritik Hata Satırına Pin / Tag Ekle</span></div>
-                <div className="text-cyan-300">./smp pin 42 "Guru Meditation crash noktası"</div>
-                <div><span className="text-[#6c7086]"># 6. Toplu Filtre Ekle</span></div>
-                <div className="text-cyan-300">./smp filter add "CORRUPT HEAP, Guru Meditation, MEPC"</div>
-                <div><span className="text-[#6c7086]"># 7. ESP32 Donanımsal Reset (EN) At</span></div>
-                <div className="text-cyan-300">./smp reset</div>
-                <div><span className="text-[#6c7086]"># 8. Seri Porta Komut Gönder</span></div>
-                <div className="text-cyan-300">./smp send "status"</div>
+                <div className="text-cyan-300">smp ports</div>
+                <div><span className="text-[#6c7086]"># 3. Otomatik Bağlan (veya smp connect /dev/ttyUSB0 115200 --reset)</span></div>
+                <div className="text-cyan-300">smp connect auto</div>
+                <div><span className="text-[#6c7086]"># 4. İnteraktif Komut & Cihaz Yanıtı Bekle</span></div>
+                <div className="text-cyan-300">smp exec "help"</div>
+                <div><span className="text-[#6c7086]"># 5. Son 20 Satır Logu Oku (Opsiyonel: filtre ile)</span></div>
+                <div className="text-cyan-300">smp logs --tail 20 --filter "HEAP"</div>
+                <div><span className="text-[#6c7086]"># 6. Kritik Hata Satırına Pin / Tag Ekle</span></div>
+                <div className="text-cyan-300">smp pin last "Guru Meditation crash noktası"</div>
+                <div><span className="text-[#6c7086]"># 7. Kabuk Komutu Çalıştır (Linux/Win)</span></div>
+                <div className="text-cyan-300">smp shell "esptool.py chip_id"</div>
+                <div><span className="text-[#6c7086]"># 8. ESP32 Donanımsal Reset (EN) At</span></div>
+                <div className="text-cyan-300">smp reset</div>
               </div>
             </div>
           </div>
