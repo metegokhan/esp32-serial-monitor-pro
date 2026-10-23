@@ -242,13 +242,7 @@ impl SerialManager {
         let port_builder = serialport::new(&port_name, baud_rate)
             .timeout(Duration::from_millis(50));
 
-        let mut port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
-
-        // CRITICAL FOR SAFE CONNECT: Enforce neutral DTR and RTS lines immediately upon open
-        // CP2102, CH340, FTDI auto-reset circuits trigger reset when DTR=low and RTS=high
-        // Setting both DTR=false and RTS=false keeps EN and IO0 high and neutral (NO RESET)
-        let _ = port.write_data_terminal_ready(false);
-        let _ = port.write_request_to_send(false);
+        let port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
 
         // Clone port handle for writing / hardware pulse
         let port_writer = port.try_clone().map_err(|e| format!("Port çoğaltılamadı: {}", e))?;
@@ -615,9 +609,6 @@ impl SerialManager {
             .timeout(Duration::from_millis(250));
 
         let mut port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
-        // Guarantee neutral lines during probe - absolutely NO reset
-        let _ = port.write_data_terminal_ready(false);
-        let _ = port.write_request_to_send(false);
 
         let _ = port.write_all(b"\r\n");
         let mut buffer = [0u8; 512];
