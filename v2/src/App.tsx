@@ -351,9 +351,32 @@ export function App() {
     const current = panelsRef.current.find((p) => p.id === panelId);
     if (!current || !current.isAiPanel || current.aiSessionStatus === 'passive') return;
 
+    const portToDisconnect = current.port || current.aiActivePort || null;
+
+    // 1. Immediately disconnect physical serial port to free file descriptor for other panels
+    try {
+      await invoke('disconnect_port', {
+        sessionId: current.id,
+        portName: portToDisconnect,
+      });
+    } catch (err) {
+      console.warn('disconnect_port error in handleDeactivateAiPanel:', err);
+    }
+
+    // 2. Also notify SMP REST server to release any held sessions
+    try {
+      fetch('http://127.0.0.1:4567/api/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: current.id, port: portToDisconnect }),
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
+
     const nowStr = new Date().toLocaleTimeString();
     const closingMsg = `[${nowStr}] ⚠️ AI BAĞLANTISI KESİLDİ / OTURUM PASİFE ALINDI ${reason ? `(${reason})` : ''}`;
-    const archiveNote = `[${nowStr}] 💾 Oturum Otomatik Olarak AI Oturumu Olarak Arşive Kaydedildi.`;
+    const archiveNote = `[${nowStr}] 💾 Oturum Otomatik Olarak AI Oturumu Olarak Arşive Kaydedildi. (Seri Port Serbest Bırakıldı)`;
     const updatedLines = [
       ...current.lines,
       '----------------------------------------------------------------------',
@@ -818,11 +841,13 @@ export function App() {
           const sId = payload.sessionId;
           const clientId = payload.client_id;
           const modelName = payload.model_name;
+          const port = payload.port;
 
           const matchingAiPanels = panelsRef.current.filter((p) => {
             if (!p.isAiPanel || p.aiSessionStatus === 'passive') return false;
             if (clientId && p.aiClientId === clientId) return true;
             if (modelName && p.aiModelName === modelName) return true;
+            if (port && (p.port === port || p.aiActivePort === port)) return true;
             if (sId && (p.id === sId || p.port === sId || p.aiActivePort === sId)) return true;
             return false;
           });
@@ -832,7 +857,11 @@ export function App() {
           });
 
           setPanels((prev) =>
-            prev.map((p) => (sId ? (p.id === sId ? { ...p, isConnected: false } : p) : { ...p, isConnected: false }))
+            prev.map((p) => {
+              if (sId && (p.id === sId || p.port === sId || p.aiActivePort === sId)) return { ...p, isConnected: false };
+              if (port && (p.port === port || p.aiActivePort === port)) return { ...p, isConnected: false };
+              return sId ? p : { ...p, isConnected: false };
+            })
           );
         }
       });
@@ -891,6 +920,7 @@ export function App() {
                   aiClientId: payload.client_id || 'anonymous',
                   aiSessionStatus: 'active',
                   aiActivePort: payload.port || p.aiActivePort || p.port,
+                  port: payload.port || p.port || p.aiActivePort || '',
                   isConnected: true,
                   lines: [...p.lines, formattedLine],
                   rawLines: [...p.rawLines, formattedLine],
@@ -985,9 +1015,12 @@ export function App() {
     if (target && target.isAiPanel && target.aiSessionStatus === 'active') {
       await archiveAiSession(target);
     }
-    if (target && target.isConnected && !target.isAiPanel) {
+    if (target && (target.isConnected || target.aiSessionStatus === 'active')) {
       try {
-        await invoke('disconnect_port', { sessionId: id });
+        await invoke('disconnect_port', {
+          sessionId: id,
+          portName: target.port || target.aiActivePort || null,
+        });
       } catch (err) {
         console.error('Error disconnecting before close:', err);
       }

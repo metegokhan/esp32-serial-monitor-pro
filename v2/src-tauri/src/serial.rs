@@ -79,6 +79,7 @@ pub struct ActiveSession {
     pub cancel_flag: Arc<AtomicBool>,
     pub reset_on_connect: bool,
     pub port_writer: Arc<Mutex<Option<Box<dyn SerialPort>>>>,
+    pub reader_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
     pub rx_bytes: Arc<AtomicUsize>,
     pub tx_bytes: Arc<AtomicUsize>,
     pub recent_lines: Arc<Mutex<VecDeque<String>>>,
@@ -95,6 +96,21 @@ impl SerialManager {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn terminate_and_cleanup(session: ActiveSession) {
+        session.is_running.store(false, Ordering::SeqCst);
+        session.cancel_flag.store(true, Ordering::SeqCst);
+        if let Ok(mut writer) = session.port_writer.lock() {
+            *writer = None;
+        }
+        if let Ok(mut h) = session.reader_handle.lock() {
+            if let Some(handle) = h.take() {
+                let _ = handle.join();
+            }
+        }
+        // Small pause to allow Linux kernel CDC-ACM driver to fully close the device file
+        thread::sleep(Duration::from_millis(35));
     }
 
     pub fn scan_ports(&self, filter: &str) -> Vec<SerialDeviceInfo> {
@@ -239,8 +255,27 @@ impl SerialManager {
         baud_rate: u32,
         reset_on_connect: bool,
     ) -> Result<(), String> {
-        // Stop any existing session with the same session_id
-        self.disconnect_session(&session_id)?;
+        // Stop any existing session with the same session_id or same port_name to release hardware descriptors
+        let to_close_sessions = {
+            let mut map = self.sessions.lock().unwrap();
+            let mut to_close = Vec::new();
+            for (sid, s) in map.iter() {
+                if sid == &session_id || s.port_name == port_name {
+                    to_close.push(sid.clone());
+                }
+            }
+            let mut removed = Vec::new();
+            for sid in to_close {
+                if let Some(session) = map.remove(&sid) {
+                    removed.push(session);
+                }
+            }
+            removed
+        };
+
+        for session in to_close_sessions {
+            Self::terminate_and_cleanup(session);
+        }
 
         // Open serial port with zero-reset neutral settings by default
         let port_builder = serialport::new(&port_name, baud_rate)
@@ -257,6 +292,7 @@ impl SerialManager {
         let tx_bytes = Arc::new(AtomicUsize::new(0));
         let recent_lines = Arc::new(Mutex::new(VecDeque::with_capacity(1000)));
         let total_lines_received = Arc::new(AtomicUsize::new(0));
+        let reader_handle = Arc::new(Mutex::new(None));
 
         let writer_mutex = Arc::new(Mutex::new(Some(port_writer)));
 
@@ -268,6 +304,7 @@ impl SerialManager {
             cancel_flag: cancel_flag.clone(),
             reset_on_connect,
             port_writer: writer_mutex.clone(),
+            reader_handle: reader_handle.clone(),
             rx_bytes: rx_bytes.clone(),
             tx_bytes: tx_bytes.clone(),
             recent_lines: recent_lines.clone(),
@@ -349,7 +386,7 @@ impl SerialManager {
         let lines_queue = recent_lines.clone();
         let total_lines_counter = total_lines_received.clone();
 
-        thread::spawn(move || {
+        let reader_thread = thread::spawn(move || {
             let mut reader = BufReader::new(port);
             let mut line_buffer = String::new();
 
@@ -415,16 +452,70 @@ impl SerialManager {
             }
         });
 
+        if let Ok(mut h) = reader_handle.lock() {
+            *h = Some(reader_thread);
+        }
+
         Ok(())
     }
 
     pub fn disconnect_session(&self, session_id: &str) -> Result<(), String> {
-        let mut map = self.sessions.lock().unwrap();
-        if let Some(session) = map.remove(session_id) {
-            session.is_running.store(false, Ordering::SeqCst);
-            session.cancel_flag.store(true, Ordering::SeqCst);
-            let mut writer = session.port_writer.lock().unwrap();
-            *writer = None;
+        let mut to_terminate = Vec::new();
+        {
+            let mut map = self.sessions.lock().unwrap();
+            // 1. Direct match on session_id
+            if let Some(session) = map.remove(session_id) {
+                to_terminate.push(session);
+            }
+
+            // 2. Match by port_name (e.g. "/dev/ttyACM0")
+            let keys_by_port: Vec<String> = map.iter()
+                .filter(|(_, s)| s.port_name == session_id)
+                .map(|(k, _)| k.clone())
+                .collect();
+            for k in keys_by_port {
+                if let Some(session) = map.remove(&k) {
+                    to_terminate.push(session);
+                }
+            }
+
+            // 3. If session_id is an AI panel (starts with "panel_ai"), remove all session_ai_* sessions
+            if session_id.starts_with("panel_ai") {
+                let keys_ai: Vec<String> = map.iter()
+                    .filter(|(k, _)| k.starts_with("session_ai"))
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for k in keys_ai {
+                    if let Some(session) = map.remove(&k) {
+                        to_terminate.push(session);
+                    }
+                }
+            }
+        }
+
+        for session in to_terminate {
+            Self::terminate_and_cleanup(session);
+        }
+
+        Ok(())
+    }
+
+    pub fn disconnect_by_port(&self, port_name: &str) -> Result<(), String> {
+        let mut to_terminate = Vec::new();
+        {
+            let mut map = self.sessions.lock().unwrap();
+            let to_remove: Vec<String> = map.iter()
+                .filter(|(_, s)| s.port_name == port_name)
+                .map(|(k, _)| k.clone())
+                .collect();
+            for sid in to_remove {
+                if let Some(session) = map.remove(&sid) {
+                    to_terminate.push(session);
+                }
+            }
+        }
+        for session in to_terminate {
+            Self::terminate_and_cleanup(session);
         }
         Ok(())
     }
@@ -685,6 +776,11 @@ impl SerialManager {
     pub fn get_first_session_id(&self) -> Option<String> {
         let map = self.sessions.lock().unwrap();
         map.keys().next().cloned()
+    }
+
+    pub fn get_session_port(&self, session_id: &str) -> Option<String> {
+        let map = self.sessions.lock().unwrap();
+        map.get(session_id).map(|s| s.port_name.clone())
     }
 
     pub fn get_lines_count(&self, session_id: Option<&str>) -> usize {

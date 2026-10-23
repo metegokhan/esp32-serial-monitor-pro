@@ -49,7 +49,12 @@ fn probe_port_cmd(
 }
 
 #[tauri::command]
-fn disconnect_port(manager: State<'_, Arc<SerialManager>>, session_id: String) -> Result<(), String> {
+fn disconnect_port(manager: State<'_, Arc<SerialManager>>, session_id: String, port_name: Option<String>) -> Result<(), String> {
+    if let Some(ref p) = port_name {
+        if !p.trim().is_empty() {
+            let _ = manager.disconnect_by_port(p);
+        }
+    }
     manager.disconnect_session(&session_id)
 }
 

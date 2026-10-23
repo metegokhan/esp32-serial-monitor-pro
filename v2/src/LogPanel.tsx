@@ -353,7 +353,10 @@ export const LogPanel: React.FC<LogPanelProps> = ({
           }
           setRemainingSeconds(null);
           try {
-            await invoke('disconnect_port', { sessionId: panel.id });
+            await invoke('disconnect_port', {
+              sessionId: panel.id,
+              portName: panel.port || panel.aiActivePort || null,
+            });
             onUpdatePanel(panel.id, { isConnected: false });
             onNotification(
               lang === 'tr'
@@ -539,7 +542,10 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   const handleToggleConnect = async () => {
     if (panel.isConnected) {
       try {
-        await invoke('disconnect_port', { sessionId: panel.id });
+        await invoke('disconnect_port', {
+          sessionId: panel.id,
+          portName: panel.port || panel.aiActivePort || null,
+        });
         onUpdatePanel(panel.id, { isConnected: false });
         onNotification(t('disconnectedMsg', lang, { port: panel.port }));
       } catch (err) {
@@ -1296,6 +1302,18 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               <span>127.0.0.1:4567</span>
             </button>
 
+            {/* AI Disconnect Button */}
+            {panel.aiSessionStatus === 'active' && (
+              <button
+                type="button"
+                onClick={() => onToggleAiPassive && onToggleAiPassive(panel.id)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition shadow cursor-pointer"
+                title={lang === 'tr' ? 'Seri port bağlantısını kes ve donanımı serbest bırak' : 'Disconnect serial port and release hardware'}
+              >
+                <span>🔌 {lang === 'tr' ? 'Bağlantıyı Kes' : 'Disconnect'}</span>
+              </button>
+            )}
+
             {/* Active / Passive Toggle */}
             {panel.aiSessionStatus === 'active' ? (
               <button
@@ -1311,7 +1329,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({
                 className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800/80 text-slate-300 border border-slate-700 text-[11px] font-mono"
                 title={panel.aiSessionArchivedAt ? `Arşivlenme: ${panel.aiSessionArchivedAt}` : undefined}
               >
-                <span>💾 {lang === 'tr' ? 'Arşivlendi' : 'Archived'}</span>
+                <span>💾 {lang === 'tr' ? 'Arşivlendi / Pasif' : 'Archived / Passive'}</span>
                 {panel.aiSessionArchivedAt && (
                   <span className="text-slate-400 text-[10px]">
                     ({new Date(panel.aiSessionArchivedAt).toLocaleTimeString()})

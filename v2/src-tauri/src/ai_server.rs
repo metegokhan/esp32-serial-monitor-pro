@@ -871,37 +871,65 @@ async fn handle_http_request(
             #[derive(Deserialize)]
             struct DisconnectReq {
                 session_id: Option<String>,
+                port: Option<String>,
+                port_name: Option<String>,
             }
 
-            let s_id = serde_json::from_str::<DisconnectReq>(body)
-                .ok()
-                .and_then(|r| r.session_id)
-                .or_else(|| state.serial_manager.get_first_session_id());
+            let req_data = serde_json::from_str::<DisconnectReq>(body).ok();
+            let port_target = req_data.as_ref().and_then(|r| r.port.clone().or_else(|| r.port_name.clone()));
+            let s_id = req_data.as_ref()
+                .and_then(|r| r.session_id.clone())
+                .or_else(|| {
+                    if let Some(ref p) = port_target {
+                        let sessions = state.serial_manager.get_active_sessions_info();
+                        sessions.into_iter().find(|s| &s.port_name == p).map(|s| s.session_id)
+                    } else {
+                        state.serial_manager.get_first_session_id()
+                    }
+                });
 
-            if let Some(id) = s_id {
-                let eff_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
-                let eff_c = header_client.clone().unwrap_or_else(|| eff_m.clone());
+            let eff_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
+            let eff_c = header_client.clone().unwrap_or_else(|| eff_m.clone());
+
+            let mut any_disconnected = false;
+
+            if let Some(ref p) = port_target {
+                let _ = state.serial_manager.disconnect_by_port(p);
+                any_disconnected = true;
+            }
+
+            if let Some(ref id) = s_id {
+                let _ = state.serial_manager.disconnect_session(id);
+                any_disconnected = true;
+            }
+
+            if any_disconnected {
                 emit_ai_terminal_line(
                     &state.app_handle,
                     &eff_m,
                     &eff_c,
-                    Some(id.clone()),
-                    None,
+                    s_id.clone(),
+                    port_target.clone(),
                     "info",
-                    &format!("🔌 [AI -> SMP] Oturum bağlantısı kesildi: {}", id),
+                    &format!("🔌 [AI -> SMP] Oturum bağlantısı kesildi (Port/Session serbest bırakıldı)"),
                     None,
                 );
-                let _ = state.serial_manager.disconnect_session(&id);
                 reconcile_models(state);
                 let _ = state.app_handle.emit(
                     "ai-action",
-                    serde_json::json!({ "type": "disconnect", "sessionId": id, "model_name": eff_m, "client_id": eff_c }),
+                    serde_json::json!({
+                        "type": "disconnect",
+                        "sessionId": s_id,
+                        "port": port_target,
+                        "model_name": eff_m,
+                        "client_id": eff_c
+                    }),
                 );
-                let resp = serde_json::json!({ "ok": true, "session_id": id });
+                let resp = serde_json::json!({ "ok": true, "session_id": s_id, "port": port_target });
                 ("200 OK", "application/json", resp.to_string())
             } else {
                 reconcile_models(state);
-                let resp = serde_json::json!({ "ok": false, "error": "No active session to disconnect" });
+                let resp = serde_json::json!({ "ok": false, "error": "No active session or port to disconnect" });
                 ("400 Bad Request", "application/json", resp.to_string())
             }
         }
@@ -1277,9 +1305,16 @@ async fn handle_http_request(
                         let mut verified_at_ms: Option<u64> = None;
                         let mut accumulated_lines: Vec<String> = Vec::new();
                         let mut was_cancelled = false;
+                        let mut premature_abort_detected = false;
+                        let mut has_http_complete_1 = false;
+                        let mut has_transition_0 = false;
 
                         let verify_target = ereq.verify_expect.as_ref().or(ereq.expect.as_ref());
                         let start_target = ereq.start_expect.as_ref();
+
+                        let is_playback_finished_target = verify_target
+                            .map(|t| t.eq_ignore_ascii_case("playback_finished"))
+                            .unwrap_or(false);
 
                         let verify_re = verify_target.and_then(|exp| {
                             RegexBuilder::new(exp).case_insensitive(true).build().ok()
@@ -1299,21 +1334,11 @@ async fn handle_http_request(
                             if l_low.contains(&t_low) {
                                 return true;
                             }
-                            // Intelligent alias for ESP32 audio playback completion:
-                            // If expected target is "PLAYBACK_FINISHED", match device's true completion signatures:
-                            if t_low == "playback_finished" {
-                                if l_low.contains("tinymusic_stream complete")
-                                    || l_low.contains("stream complete")
-                                    || l_low.contains("track result=0")
-                                    || l_low.contains("playback_finished")
-                                {
-                                    return true;
-                                }
-                            }
                             false
                         };
 
                         let mut last_count = start_count;
+                        let session_port = state.serial_manager.get_session_port(&id);
 
                         while exec_start_time.elapsed() < timeout {
                             // Support cancellation mid-wait
@@ -1330,6 +1355,25 @@ async fn handle_http_request(
                                 last_count = current_total;
 
                                 for l in &new_lines {
+                                    let l_low = l.to_lowercase();
+
+                                    // Detect premature abort / skip conditions:
+                                    // http_complete=0 indicates incomplete HTTP stream
+                                    // transition=1 (or non-zero) indicates skipped / premature track transition
+                                    if l_low.contains("http_complete=0")
+                                        || l_low.contains("transition=1")
+                                        || (l_low.contains("transition=") && !l_low.contains("transition=0"))
+                                    {
+                                        premature_abort_detected = true;
+                                    }
+
+                                    if l_low.contains("http_complete=1") {
+                                        has_http_complete_1 = true;
+                                    }
+                                    if l_low.contains("transition=0") {
+                                        has_transition_0 = true;
+                                    }
+
                                     // Detect Started stage
                                     if !started_detected {
                                         if let Some(ref st_exp) = start_target {
@@ -1345,10 +1389,25 @@ async fn handle_http_request(
 
                                     // Detect Verification stage
                                     if let Some(ref exp) = verify_target {
-                                        if matches_target(l, exp.as_str(), &verify_re) {
-                                            matched_expect = true;
-                                            if verified_at_ms.is_none() {
-                                                verified_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                        if is_playback_finished_target {
+                                            // PLAYBACK_FINISHED must strictly require http_complete=1 AND transition=0.
+                                            // Premature skip (transition=1) or interrupted stream (http_complete=0) MUST NOT pass.
+                                            if !premature_abort_detected {
+                                                if (has_http_complete_1 && has_transition_0)
+                                                    || (l_low.contains("playback_finished") && !l_low.contains("http_complete=0") && !l_low.contains("transition=1"))
+                                                {
+                                                    matched_expect = true;
+                                                    if verified_at_ms.is_none() {
+                                                        verified_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            if matches_target(l, exp.as_str(), &verify_re) {
+                                                matched_expect = true;
+                                                if verified_at_ms.is_none() {
+                                                    verified_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                                }
                                             }
                                         }
                                     }
@@ -1358,7 +1417,7 @@ async fn handle_http_request(
                                         &eff_m,
                                         &eff_c,
                                         Some(id.clone()),
-                                        None,
+                                        session_port.clone(),
                                         "rx",
                                         &format!("📥 [RX <- ESP32] {}", l),
                                         None,
@@ -1379,6 +1438,11 @@ async fn handle_http_request(
                                 accumulated_lines.extend(new_lines);
 
                                 if matched_expect {
+                                    break;
+                                }
+
+                                // If playback finished was requested and premature transition to next song occurred, stop waiting early
+                                if is_playback_finished_target && premature_abort_detected && accumulated_lines.iter().any(|l| l.to_lowercase().contains("transition=1")) {
                                     break;
                                 }
                             }
@@ -1433,6 +1497,8 @@ async fn handle_http_request(
                             "CANCELLED"
                         } else if matched_expect {
                             "PASSED_VERIFIED"
+                        } else if premature_abort_detected {
+                            "PLAYBACK_PREMATURE_OR_SKIPPED"
                         } else if fatal_crash_detected {
                             "DEVICE_CRASH_OR_ERROR"
                         } else if started_detected && !response_lines.is_empty() {
@@ -1442,8 +1508,9 @@ async fn handle_http_request(
                         };
 
                         let verdict_detail = match verdict {
-                            "PASSED_VERIFIED" => "Komut başarıyla yürütüldü ve beklenen tüm doğrulama kriterleri karşılandı.",
-                            "EXECUTED_MARKER_MISMATCH" => "Komut cihaza iletildi ve yürütme gerçekleşti (çıktı akışı alındı, çökme yok); ancak belirtilen doğrulama işareti log akışında yer almadı. Bu bir oynatma hatası değil, aranan log deseni ile donanımın yaydığı işaret arasındaki uyuşmazlıktır.",
+                            "PASSED_VERIFIED" => "Komut başarıyla yürütüldü ve beklenen tüm doğrulama kriterleri karşılandı (http_complete=1 ve transition=0 doğal tamamlanma doğrulandı).",
+                            "PLAYBACK_PREMATURE_OR_SKIPPED" => "Oynatma doğal olarak tamamlanmadı: Parça erken atlandı (transition=1) veya HTTP akışı kesintiye uğradı (http_complete=0).",
+                            "EXECUTED_MARKER_MISMATCH" => "Komut cihaza iletildi ve yürütme gerçekleşti (çıktı akışı alındı, çökme yok); ancak belirtilen doğrulama işareti log akışında yer almadı. Bu bir donanım çökmesi değil, aranan log deseni ile cihaz çıktısı arasındaki uyuşmazlıktır.",
                             "DEVICE_CRASH_OR_ERROR" => "Cihaz loglarında çökme veya donanımsal hata (Guru Meditation / abort / heap corruption) tespit edildi.",
                             "TIMEOUT_NO_RESPONSE" => "Cihazdan komuta dair hiçbir yanıt veya log satırı alınamadı.",
                             "CANCELLED" => "Doğrulama bekleyişi sonlandırıldı (Yalnızca host-side bekleme durduruldu, donanım bağımsız çalışmayı sürdürür).",
@@ -1452,8 +1519,8 @@ async fn handle_http_request(
 
                         let verified_stage = if let Some(exp) = verify_target {
                             if matched_expect {
-                                let msg = if exp.eq_ignore_ascii_case("PLAYBACK_FINISHED") {
-                                    format!("Beklenen yanıt doğrulandı: '{}' (Cihazın eşdeğer kararlı işareti 'TINYMUSIC_STREAM complete' algılandı)", exp)
+                                let msg = if is_playback_finished_target {
+                                    format!("Beklenen yanıt doğrulandı: '{}' (Cihazın doğal bitiş kriterleri http_complete=1 ve transition=0 karşılandı)", exp)
                                 } else {
                                     format!("Beklenen yanıt doğrulandı: '{}'", exp)
                                 };
@@ -1462,6 +1529,13 @@ async fn handle_http_request(
                                     "status": "passed",
                                     "message": msg,
                                     "elapsed_ms": verified_at_ms.unwrap_or(exec_duration_ms)
+                                })
+                            } else if premature_abort_detected {
+                                serde_json::json!({
+                                    "name": "Doğrulandı (Oynatma/Sonuç)",
+                                    "status": "failed",
+                                    "message": "Oynatma tamamlanmadı (Erken geçiş / transition=1 veya akış kesintisi / http_complete=0 algılandı)",
+                                    "elapsed_ms": exec_duration_ms
                                 })
                             } else if was_cancelled {
                                 serde_json::json!({
@@ -1501,14 +1575,15 @@ async fn handle_http_request(
                             })
                         };
 
-                        // ok: technical success without crash or fatal error
+                        // ok: technical success without crash or fatal error or premature abort
                         // passed: whether assertions passed
-                        let passed = if verify_target.is_some() { matched_expect } else { true };
+                        let passed = if verify_target.is_some() { matched_expect && !premature_abort_detected } else { true };
 
                         let resp = serde_json::json!({
-                            "ok": !was_cancelled && !fatal_crash_detected,
+                            "ok": !was_cancelled && !fatal_crash_detected && !premature_abort_detected,
                             "cancelled": was_cancelled,
                             "passed": passed,
+                            "premature_abort_detected": premature_abort_detected,
                             "verdict": verdict,
                             "verdict_detail": verdict_detail,
                             "cancellation_scope": if was_cancelled {

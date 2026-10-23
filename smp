@@ -314,8 +314,13 @@ def main():
                 print(f"  • Hata: {err_msg}")
 
     elif cmd == "disconnect":
-        session_id = args[1] if len(args) > 1 else None
-        data = {"session_id": session_id} if session_id else {}
+        target = args[1] if len(args) > 1 else None
+        data = {}
+        if target:
+            if "/" in target or target.startswith("tty"):
+                data["port"] = target
+            else:
+                data["session_id"] = target
         print_result(request("/api/disconnect", "POST", data))
 
     elif cmd in ("cancel", "abort"):
@@ -507,7 +512,11 @@ def main():
                     if verdict:
                         print("\n📊 Teşhis ve Değerlendirme:")
                         if verdict == "PASSED_VERIFIED":
-                            print("  ✅ [BAŞARILI] Komut yürütüldü ve tüm doğrulama kriterleri karşılandı.")
+                            print("  ✅ [BAŞARILI] Komut yürütüldü ve tüm doğrulama kriterleri karşılandı (http_complete=1 & transition=0).")
+                        elif verdict == "PLAYBACK_PREMATURE_OR_SKIPPED":
+                            print("  ⚠️ [ERKEN GEÇİŞ / AKIŞ KESİNTİSİ] Parça doğal olarak bitmedi!")
+                            print("     Cihaz loglarında 'transition=1' (erken atlama) veya 'http_complete=0' (akış kesintisi) tespit edildi.")
+                            print("     Doğrulama kuralı: Oynatmanın başarılı sayılması için 'http_complete=1' VE 'transition=0' şarttır.")
                         elif verdict == "EXECUTED_MARKER_MISMATCH":
                             print(f"  ⚠️ [İŞARET UYUŞMAZLIĞI] Komut cihazda başarıyla çalıştı ve log üretti (Çökme yok).")
                             print(f"     Ancak aranan '{expect_str}' deseni log akışında görülmedi.")
