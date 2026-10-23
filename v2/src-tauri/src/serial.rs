@@ -30,11 +30,24 @@ pub struct SerialDeviceInfo {
     pub display_name: String,
     pub description: String,
     pub manufacturer: Option<String>,
+    pub serial_number: Option<String>,
+    pub usb_product: Option<String>,
     pub vid: Option<u16>,
     pub pid: Option<u16>,
     pub is_esp: bool,
     pub is_arduino: bool,
     pub category: String,
+    pub safe_connect: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortProbeResult {
+    pub port_name: String,
+    pub baud_rate: u32,
+    pub responsive: bool,
+    pub response_sample: String,
+    pub chip_family: String,
+    pub device_info: Option<SerialDeviceInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +72,8 @@ pub struct ActiveSession {
     pub port_name: String,
     pub baud_rate: u32,
     pub is_running: Arc<AtomicBool>,
+    pub cancel_flag: Arc<AtomicBool>,
+    pub reset_on_connect: bool,
     pub port_writer: Arc<Mutex<Option<Box<dyn SerialPort>>>>,
     pub rx_bytes: Arc<AtomicUsize>,
     pub tx_bytes: Arc<AtomicUsize>,
@@ -87,21 +102,43 @@ impl SerialManager {
                 let mut vid = None;
                 let mut pid = None;
                 let mut manufacturer = None;
+                let mut serial_number = None;
+                let mut usb_product = None;
                 let mut description = p.port_name.clone();
+                let mut chip_detail = String::new();
 
                 match &p.port_type {
                     SerialPortType::UsbPort(usb) => {
                         vid = Some(usb.vid);
                         pid = Some(usb.pid);
                         manufacturer = usb.manufacturer.clone();
+                        serial_number = usb.serial_number.clone();
+                        usb_product = usb.product.clone();
                         if let Some(ref prod) = usb.product {
                             description = prod.clone();
                         }
 
-                        // ESP32 VIDs
-                        if usb.vid == 0x303A || usb.vid == 0x10C4 || usb.vid == 0x1A86 || usb.vid == 0x0403 {
+                        // ESP32 VIDs & Product matching
+                        if usb.vid == 0x303A {
                             is_esp = true;
+                            chip_detail = match usb.pid {
+                                0x1001 => "ESP32-S2/S3 (Native USB CDC)".to_string(),
+                                0x1002 => "ESP32-C3/C6 (Native USB CDC)".to_string(),
+                                0x1003 => "ESP32-H2 (Native USB CDC)".to_string(),
+                                0x1004 | 0x1005 => "ESP32-P4 (Native USB CDC)".to_string(),
+                                _ => "Espressif Native USB".to_string(),
+                            };
+                        } else if usb.vid == 0x10C4 {
+                            is_esp = true;
+                            chip_detail = "ESP32 (CP210x UART)".to_string();
+                        } else if usb.vid == 0x1A86 {
+                            is_esp = true;
+                            chip_detail = "ESP32/Arduino (CH340/CH343 UART)".to_string();
+                        } else if usb.vid == 0x0403 {
+                            is_esp = true;
+                            chip_detail = "ESP32 (FTDI UART / ESP-Prog)".to_string();
                         }
+
                         // Arduino VIDs
                         if usb.vid == 0x2341 || usb.vid == 0x2A03 || usb.vid == 0x1B4F {
                             is_arduino = true;
@@ -143,13 +180,14 @@ impl SerialManager {
 
                 if should_include {
                     let mut display_name = p.port_name.clone();
-                    if description != p.port_name && !description.is_empty() {
-                        display_name = format!("{} ({})", p.port_name, description);
-                    }
-                    if is_esp {
-                        display_name = format!("⚡ {} [ESP32]", display_name);
+                    if !chip_detail.is_empty() {
+                        display_name = format!("⚡ {} — {} ({})", p.port_name, chip_detail, description);
+                    } else if is_esp {
+                        display_name = format!("⚡ {} [ESP32] ({})", p.port_name, description);
                     } else if is_arduino {
-                        display_name = format!("🔌 {} [Arduino]", display_name);
+                        display_name = format!("🔌 {} [Arduino] ({})", p.port_name, description);
+                    } else if description != p.port_name && !description.is_empty() {
+                        display_name = format!("{} ({})", p.port_name, description);
                     }
 
                     devices.push(SerialDeviceInfo {
@@ -157,11 +195,14 @@ impl SerialManager {
                         display_name,
                         description,
                         manufacturer,
+                        serial_number,
+                        usb_product,
                         vid,
                         pid,
                         is_esp,
                         is_arduino,
                         category,
+                        safe_connect: true,
                     });
                 }
             }
@@ -201,12 +242,19 @@ impl SerialManager {
         let port_builder = serialport::new(&port_name, baud_rate)
             .timeout(Duration::from_millis(50));
 
-        let port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
+        let mut port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
+
+        // CRITICAL FOR SAFE CONNECT: Enforce neutral DTR and RTS lines immediately upon open
+        // CP2102, CH340, FTDI auto-reset circuits trigger reset when DTR=low and RTS=high
+        // Setting both DTR=false and RTS=false keeps EN and IO0 high and neutral (NO RESET)
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
 
         // Clone port handle for writing / hardware pulse
         let port_writer = port.try_clone().map_err(|e| format!("Port çoğaltılamadı: {}", e))?;
 
         let is_running = Arc::new(AtomicBool::new(true));
+        let cancel_flag = Arc::new(AtomicBool::new(false));
         let rx_bytes = Arc::new(AtomicUsize::new(0));
         let tx_bytes = Arc::new(AtomicUsize::new(0));
         let recent_lines = Arc::new(Mutex::new(VecDeque::with_capacity(1000)));
@@ -219,6 +267,8 @@ impl SerialManager {
             port_name: port_name.clone(),
             baud_rate,
             is_running: is_running.clone(),
+            cancel_flag: cancel_flag.clone(),
+            reset_on_connect,
             port_writer: writer_mutex.clone(),
             rx_bytes: rx_bytes.clone(),
             tx_bytes: tx_bytes.clone(),
@@ -231,7 +281,7 @@ impl SerialManager {
             map.insert(session_id.clone(), active_session);
         }
 
-        // Perform reset on connect if user requested it explicitly
+        // Perform reset on connect ONLY if user requested it explicitly
         if reset_on_connect {
             let mut w = writer_mutex.lock().unwrap();
             if let Some(ref mut p) = *w {
@@ -255,12 +305,28 @@ impl SerialManager {
             .open(&archive_path)
             .ok();
 
+        let header = format!(
+            "=== ESP32 SERIAL MONITOR ARCHIVE ===\nSession: {}\nPort: {}\nBaud: {}\nMode: {}\nStart: {}\n=====================================\n\n",
+            session_id,
+            port_name,
+            baud_rate,
+            if reset_on_connect { "RESET_ON_CONNECT (Hardware reset triggered)" } else { "SAFE_CONNECT (DTR/RTS Neutral - No reset)" },
+            Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+
         if let Some(ref mut f) = archive_file {
-            let header = format!(
-                "=== ESP32 SERIAL MONITOR ARCHIVE ===\nSession: {}\nPort: {}\nBaud: {}\nStart: {}\n=====================================\n\n",
-                session_id, port_name, baud_rate, Local::now().format("%Y-%m-%d %H:%M:%S")
-            );
             let _ = f.write_all(header.as_bytes());
+        }
+
+        // Add explicit safe connect / reset banner into recent lines
+        let banner_line = if reset_on_connect {
+            "⚠️ [RESETLİ BAĞLANTI] Port açıldı ve EN pini tetiklendi (Boot logları yakalanıyor)".to_string()
+        } else {
+            format!("🛡️ [GÜVENLİ BAĞLANTI] Port açıldı: {} @ {} baud | DTR: Nötr, RTS: Nötr (Donanımsal reset KAPALI)", port_name, baud_rate)
+        };
+        recent_lines.lock().unwrap().push_back(banner_line.clone());
+        if let Some(ref mut f) = archive_file {
+            let _ = f.write_all(format!("{}\n", banner_line).as_bytes());
         }
 
         // Emit connected status to frontend
@@ -358,10 +424,42 @@ impl SerialManager {
         let mut map = self.sessions.lock().unwrap();
         if let Some(session) = map.remove(session_id) {
             session.is_running.store(false, Ordering::SeqCst);
+            session.cancel_flag.store(true, Ordering::SeqCst);
             let mut writer = session.port_writer.lock().unwrap();
             *writer = None;
         }
         Ok(())
+    }
+
+    pub fn cancel_session(&self, session_id: &str) -> bool {
+        let map = self.sessions.lock().unwrap();
+        if let Some(session) = map.get(session_id) {
+            session.cancel_flag.store(true, Ordering::SeqCst);
+            return true;
+        }
+        false
+    }
+
+    pub fn cancel_all(&self) {
+        let map = self.sessions.lock().unwrap();
+        for session in map.values() {
+            session.cancel_flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn is_cancelled(&self, session_id: &str) -> bool {
+        let map = self.sessions.lock().unwrap();
+        if let Some(session) = map.get(session_id) {
+            return session.cancel_flag.load(Ordering::SeqCst);
+        }
+        false
+    }
+
+    pub fn reset_cancel_flag(&self, session_id: &str) {
+        let map = self.sessions.lock().unwrap();
+        if let Some(session) = map.get(session_id) {
+            session.cancel_flag.store(false, Ordering::SeqCst);
+        }
     }
 
     pub fn send_data(&self, session_id: &str, data: &str) -> Result<(), String> {
@@ -387,11 +485,17 @@ impl SerialManager {
     ) -> Result<usize, String> {
         let map = self.sessions.lock().unwrap();
         if let Some(session) = map.get(session_id) {
+            session.cancel_flag.store(false, Ordering::SeqCst);
             let mut writer = session.port_writer.lock().unwrap();
             if let Some(ref mut port) = *writer {
                 let mut total_bytes = 0;
                 let count = lines.len();
                 for (idx, line) in lines.iter().enumerate() {
+                    // Check cancellation flag for long running sends
+                    if session.cancel_flag.load(Ordering::SeqCst) {
+                        return Err(format!("İşlem kullanıcı tarafından iptal edildi (Gönderilen: {}/{})", idx, count));
+                    }
+
                     let formatted = format!("{}{}", line, eol);
                     let bytes = formatted.as_bytes();
                     port.write_all(bytes).map_err(|e| format!("Veri yazma hatası: {}", e))?;
@@ -437,6 +541,9 @@ impl SerialManager {
                 port.write_request_to_send(true).map_err(|e| e.to_string())?;
                 thread::sleep(Duration::from_millis(100));
                 port.write_request_to_send(false).map_err(|e| e.to_string())?;
+
+                let marker = format!("⚡ [DONANIMSAL RESET] EN pinine 100ms darbe gönderildi - Cihaz yeniden başlatıldı ({})", Local::now().format("%H:%M:%S%.3f"));
+                session.recent_lines.lock().unwrap().push_back(marker);
                 return Ok(());
             }
         }
@@ -454,10 +561,61 @@ impl SerialManager {
                 port.write_request_to_send(false).map_err(|e| e.to_string())?;  // EN HIGH
                 thread::sleep(Duration::from_millis(50));
                 port.write_data_terminal_ready(false).map_err(|e| e.to_string())?; // IO0 HIGH
+
+                let marker = format!("⚡ [BOOTLOADER MODU] IO0 LOW + EN darbesi verildi - Download Modu ({})", Local::now().format("%H:%M:%S%.3f"));
+                session.recent_lines.lock().unwrap().push_back(marker);
                 return Ok(());
             }
         }
         Err("Bağlantı aktif değil".to_string())
+    }
+
+    pub fn probe_port(&self, port_name: &str, baud_rate: u32) -> Result<PortProbeResult, String> {
+        let ports = self.scan_ports("");
+        let dev_info = ports.into_iter().find(|p| p.port_name == port_name);
+
+        let port_builder = serialport::new(port_name, baud_rate)
+            .timeout(Duration::from_millis(250));
+
+        let mut port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
+        // Guarantee neutral lines during probe - absolutely NO reset
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        let _ = port.write_all(b"\r\n");
+        let mut buffer = [0u8; 512];
+        let bytes_read = port.read(&mut buffer).unwrap_or(0);
+        let response = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+
+        let mut chip_family = "Generic UART".to_string();
+        if let Some(ref d) = dev_info {
+            if let Some(vid) = d.vid {
+                if vid == 0x303A {
+                    chip_family = match d.pid {
+                        Some(0x1001) => "ESP32-S2/S3 (Native USB CDC)".to_string(),
+                        Some(0x1002) => "ESP32-C3/C6 (Native USB CDC)".to_string(),
+                        Some(0x1003) => "ESP32-H2 (Native USB CDC)".to_string(),
+                        Some(0x1004) | Some(0x1005) => "ESP32-P4 (Native USB CDC)".to_string(),
+                        _ => "Espressif Native USB".to_string(),
+                    };
+                } else if vid == 0x10C4 {
+                    chip_family = "Silicon Labs CP210x (ESP32 UART)".to_string();
+                } else if vid == 0x1A86 {
+                    chip_family = "WCH CH340/CH343 (ESP32 UART)".to_string();
+                } else if vid == 0x0403 {
+                    chip_family = "FTDI FT232R/FT2232H (ESP-Prog)".to_string();
+                }
+            }
+        }
+
+        Ok(PortProbeResult {
+            port_name: port_name.to_string(),
+            baud_rate,
+            responsive: bytes_read > 0,
+            response_sample: response.trim().to_string(),
+            chip_family,
+            device_info: dev_info,
+        })
     }
 
     pub fn get_recent_lines(&self, session_id: Option<&str>, tail: usize) -> Vec<String> {

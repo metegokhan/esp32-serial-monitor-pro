@@ -24,6 +24,17 @@ interface SmpCliStatus {
   message: string;
 }
 
+const extractStages = (resp: string) => {
+  if (!resp || !resp.includes('"stages"')) return null;
+  try {
+    const parsed = JSON.parse(resp);
+    if (parsed && parsed.stages) {
+      return parsed.stages;
+    }
+  } catch {}
+  return null;
+};
+
 interface AiActivityModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -553,6 +564,60 @@ When starting, inspect \`smp status\` and \`smp help\` to verify connected hardw
                           <span>{log.payload}</span>
                         </div>
                       )}
+
+                      {(() => {
+                        const stages = extractStages(log.response);
+                        if (!stages) return null;
+                        return (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 ${
+                                stages.uploaded?.status === 'passed'
+                                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
+                                  : stages.uploaded?.status === 'cancelled'
+                                  ? 'bg-amber-950/80 text-amber-300 border border-amber-700/60'
+                                  : 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                              }`}
+                              title={stages.uploaded?.message}
+                            >
+                              <span>1. Yüklendi:</span>
+                              <span>{stages.uploaded?.status === 'passed' ? '✓' : stages.uploaded?.status === 'cancelled' ? 'İptal' : '✕'}</span>
+                            </span>
+
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 ${
+                                stages.started?.status === 'passed'
+                                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
+                                  : stages.started?.status === 'waiting'
+                                  ? 'bg-slate-900 text-slate-400 border border-slate-700'
+                                  : stages.started?.status === 'cancelled'
+                                  ? 'bg-amber-950/80 text-amber-300 border border-amber-700/60'
+                                  : 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                              }`}
+                              title={stages.started?.message}
+                            >
+                              <span>2. Başlatıldı:</span>
+                              <span>{stages.started?.status === 'passed' ? '✓' : stages.started?.status === 'waiting' ? 'Bekliyor' : '✕'}</span>
+                            </span>
+
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1 ${
+                                stages.verified?.status === 'passed'
+                                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
+                                  : stages.verified?.status === 'skipped'
+                                  ? 'bg-slate-900 text-slate-400 border border-slate-700'
+                                  : stages.verified?.status === 'cancelled'
+                                  ? 'bg-amber-950/80 text-amber-300 border border-amber-700/60'
+                                  : 'bg-amber-950/80 text-amber-300 border border-amber-700/60'
+                              }`}
+                              title={stages.verified?.message}
+                            >
+                              <span>3. Doğrulandı:</span>
+                              <span>{stages.verified?.status === 'passed' ? '✓' : stages.verified?.status === 'skipped' ? 'Atlandı' : '? Bekleniyor'}</span>
+                            </span>
+                          </div>
+                        );
+                      })()}
 
                       {isExpanded && (
                         <div className="mt-3 pt-3 border-t border-[#25283b] space-y-2 text-xs font-mono animate-in fade-in duration-100">

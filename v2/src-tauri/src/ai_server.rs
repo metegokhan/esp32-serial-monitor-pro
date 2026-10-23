@@ -85,22 +85,31 @@ Returns the complete state of the serial monitor:
 ### 2. `GET /api/ports` (or `./smp ports`)
 Scans host USB/UART ports. Identifies ESP32, Arduino, CH340, CP2102, FTDI chips with VID/PID and category.
 
-### 3. `POST /api/connect` (or `./smp connect [port|"auto"] [baud] [--reset]`)
-Connects to a serial port.
-- JSON body: `{"port": "auto"|"/dev/ttyUSB0", "baud": 115200, "reset": false}`
+### 3. `POST /api/connect` (or `./smp connect [port|"auto"] [baud] [--reset] [--match <hint>]`)
+Connects to a serial port safely.
+- JSON body: `{"port": "auto"|"/dev/ttyUSB0", "baud": 115200, "reset": false, "match": "ESP32"}`
+- **🛡️ Safe Connect Default**: Neutral RTS/DTR lines guaranteed, zero reset.
 - If `port` is omitted or `"auto"`, automatically detects and connects to the plugged ESP32/UART device!
-- If already connected, gracefully returns the existing active session without error.
+- `--match <hint>` disambiguates when multiple devices are plugged in (matches chip name, VID/PID, serial number).
+- If already connected, gracefully returns the existing active session without reset.
 
-### 4. `POST /api/disconnect` (or `./smp disconnect [session_id]`)
-Disconnects the port cleanly.
+### 4. `POST /api/probe` (or `./smp probe [port] [baud]`)
+Non-destructive chip and protocol probe without triggering an EN/IO0 hardware reset!
+- Returns chip family, USB identifiers, and initial response sample.
+
+### 5. `POST /api/disconnect` (or `./smp disconnect [session_id]`)
+Disconnects the port cleanly and cleans up AI session mappings.
 - JSON body: `{"session_id": "session_xxx"}` (or empty for default session).
 
-### 5. `GET /api/logs` (or `./smp logs [--tail N] [--filter <term>]`)
+### 6. `POST /api/cancel` (or `./smp cancel [session_id]`)
+Aborts any active long-running serial upload or execution wait immediately (also bound to Ctrl+C in CLI).
+
+### 7. `GET /api/logs` (or `./smp logs [--tail N] [--filter <term>]`)
 Fetches the latest N log lines from the device.
 - Query params: `tail=50`, `filter=HEAP`, `session_id=...`
 - Returns: `{"lines": ["line 1", "line 2", ...], "count": 50}`
 
-### 6. `POST /api/send` (or `./smp send <command> [--delay ms] [--raw] [-f file]`)
+### 8. `POST /api/send` (or `./smp send <command> [--delay ms] [--raw] [-f file]`)
 Sends single-line or multiline UART data to the connected device.
 - JSON body:
   - `{"data": "AT+GMR\r\n", "session_id": "..."}` (single line)
@@ -108,62 +117,68 @@ Sends single-line or multiline UART data to the connected device.
   - `{"data": "print(1)\nprint(2)", "line_delay_ms": 30, "eol": "\r\n"}` (multiline string)
   - `{"data": "\x01\x02", "raw": true}` (raw bytes)
 
-### 7. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
-**⚡ Interactive Serial Execution**: Sends command(s), waits for device response lines, and returns them immediately!
-- JSON body: `{"command": "help", "timeout_ms": 2500, "expect": ">>>", "line_delay_ms": 30}`
-- Returns: `{"ok": true, "command": "help", "response_lines": [...], "response_text": "...", "duration_ms": 140, "matched_expect": true}`
+### 9. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
+**⚡ Interactive Serial Execution with Granular Stage Breakdown**:
+Sends command(s), streams live output lines to terminal, and returns 3 distinct stages:
+- **`stages.uploaded`**: Technical transmission & CRC/byte transfer
+- **`stages.started`**: Execution start & initial response detection
+- **`stages.verified`**: Assertion verification (does not falsify technical `ok` if unverified)
+- Supports up to 300,000ms timeout for large transfers.
+- JSON body: `{"command": "help", "timeout_ms": 5000, "expect": ">>>", "line_delay_ms": 30}`
 
-### 8. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
+### 10. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
 **💻 Cross-Platform Local Shell Execution**: Runs system shell command (Windows PowerShell / Linux bash/sh) and returns stdout/stderr.
 - JSON body: `{"command": "idf.py build", "cwd": "/path", "timeout_sec": 60}`
 - Returns: `{"ok": true, "stdout": "...", "stderr": "...", "exit_code": 0, "duration_ms": 250, "platform": "linux"|"windows"}`
 
-### 9. `POST /api/reset` (or `./smp reset`)
-Executes an ESP32 Hardware Reset by pulsing the EN line.
+### 11. `POST /api/reset` (or `./smp reset`)
+Executes an explicit ESP32 Hardware Reset by pulsing the EN line (audited and recorded in stream).
 
-### 10. `POST /api/boot` (or `./smp boot`)
+### 12. `POST /api/boot` (or `./smp boot`)
 Forces the ESP32 into ROM Bootloader / Download Mode (IO0 low + EN pulse).
 
-### 11. `POST /api/pin` (or `./smp pin [line_index|"last"] [note] [--preset 1-6]`)
+### 13. `POST /api/pin` (or `./smp pin [line_index|"last"] [note] [--preset 1-6]`)
 Tags and bookmarks a log line (or latest received line if omitted or "last") with timestamp, note, preset shape, and emoji.
 - JSON body: `{"line_index": "last"|42, "note": "Crash occurred here", "shape": "circle", "color": "#a855f7", "emoji": "😡", "description": "ekran hatası"}`
 - Supports presets (1-6) and shapes: circle, square, triangle, pentagon, diamond.
 
-### 12. `GET /api/pins` (or `./smp pins`)
+### 14. `GET /api/pins` (or `./smp pins`)
 Lists all bookmarked pins and notes across panels.
 
-### 13. `DELETE /api/pin` (or `./smp pin remove <id>`)
+### 15. `DELETE /api/pin` (or `./smp pin remove <id>`)
 Removes a pin by ID or line index.
 
-### 14. `POST /api/filter` (or `./smp filter add <tags...>`)
+### 16. `POST /api/filter` (or `./smp filter add <tags...>`)
 Adds or removes filter tags in the UI.
 - JSON body: `{"action": "add"|"remove"|"clear", "tags": ["HEAP", "Guru Meditation"]}`
 - Supports tag context window filters: `tag+5`, `tag+-5`, `tag:ekran hatası+3`
 
-### 15. `POST /api/trigger` (or `./smp trigger add <tag>`)
+### 17. `POST /api/trigger` (or `./smp trigger add <tag>`)
 Sets an armed target trigger word.
 
-### 16. `GET /api/archives` (or `./smp archives`)
+### 18. `GET /api/archives` (or `./smp archives`)
 Lists all recorded session log archives on local disk.
 
-### 17. `GET /api/ai-logs` (or `./smp ai-logs`)
+### 19. `GET /api/ai-logs` (or `./smp ai-logs`)
 Returns the audit trail of all commands executed by AI models, visible live in the UI.
 
-### 18. `GET /api/ai-models` (or `./smp ai-models`)
-Cross-model peer visibility: lists connected AI models, their active ports, sessions, and last activity.
+### 20. `GET /api/ai-models` (or `./smp ai-models`)
+Cross-model peer directory: lists connected AI models, their active ports, sessions, and last activity (auto-pruned when ports disconnect).
 - Agents can supply headers `X-AI-Model: <name>` and `X-AI-Client: <id>` or query `?model=...`.
 
 ---
 
 ## 💡 Quick Examples (cURL or CLI):
 ```bash
-# Auto-connect to plugged ESP32
+# Auto-connect safely to ESP32 (DTR/RTS neutral, no reset)
 smp connect auto
-# Interactive query: send command and print device response immediately!
+# Non-destructive probe of port
+smp probe /dev/ttyUSB0
+# Interactive query: send command, stream output live, view stage status
 smp exec "help"
-# Send multiline MicroPython script with 30ms delay
+# Send multiline script with 30ms delay
 smp send -f script.py --delay 30
-# Run local shell tool (e.g. esptool or idf)
+# Run local shell tool
 smp shell "esptool.py chip_id"
 # Read logs with tag context window (+- 5 lines)
 smp logs --filter "tag+5"
@@ -254,6 +269,35 @@ pub fn start_ai_http_server(
             });
         })
         .expect("Failed to spawn ai-http-server thread");
+}
+
+fn reconcile_models(state: &AiServerState) {
+    let active_sessions = state.serial_manager.get_active_sessions_info();
+    let active_sess_ids: std::collections::HashSet<String> = active_sessions.iter().map(|s| s.session_id.clone()).collect();
+    let active_ports: std::collections::HashSet<String> = active_sessions.iter().map(|s| s.port_name.clone()).collect();
+
+    let mut models = state.ai_models.lock().unwrap();
+    let mut changed = false;
+    for model in models.values_mut() {
+        if let Some(ref sid) = model.session_id {
+            if !active_sess_ids.contains(sid) {
+                model.session_id = None;
+                model.active_port = None;
+                changed = true;
+            }
+        }
+        if let Some(ref p) = model.active_port {
+            if !active_ports.contains(p) {
+                model.active_port = None;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        let all_models: Vec<AiModelSession> = models.values().cloned().collect();
+        drop(models);
+        let _ = state.app_handle.emit("ai-models-updated", all_models);
+    }
 }
 
 fn record_ai_activity(
@@ -378,6 +422,7 @@ async fn handle_http_request(
 
         // 2. Status
         ("GET", "/api/status") => {
+            reconcile_models(state);
             let sessions = state.serial_manager.get_active_sessions_info();
             let ports = state.serial_manager.scan_ports("");
             let pins_list = state.pins.lock().unwrap().clone();
@@ -422,13 +467,16 @@ async fn handle_http_request(
             ("200 OK", "application/json", serde_json::to_string_pretty(&ports).unwrap_or_default())
         }
 
-        // 4. Connect Port (Supports auto-detection & graceful reconnect)
+        // 4. Connect Port (Supports auto-detection, disambiguation hint, & safe connection without reset)
         ("POST", "/api/connect") => {
             #[derive(Deserialize)]
             struct ConnectReq {
                 port: Option<String>,
                 baud: Option<u32>,
                 reset: Option<bool>,
+                match_hint: Option<String>,
+                #[serde(rename = "match")]
+                port_match: Option<String>,
                 session_id: Option<String>,
                 model_name: Option<String>,
                 client_id: Option<String>,
@@ -437,12 +485,28 @@ async fn handle_http_request(
             match serde_json::from_str::<ConnectReq>(body) {
                 Ok(req_data) => {
                     let available = state.serial_manager.scan_ports("");
+                    let pattern = req_data.port_match.or(req_data.match_hint).map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
+
                     let target_port = match req_data.port.as_deref() {
                         Some(p) if !p.trim().is_empty() && p.to_lowercase() != "auto" => p.to_string(),
                         _ => {
-                            let best = available.iter().find(|d| d.is_esp)
+                            let matched = if let Some(ref pat) = pattern {
+                                available.iter().find(|d| {
+                                    d.port_name.to_lowercase().contains(pat)
+                                        || d.display_name.to_lowercase().contains(pat)
+                                        || d.usb_product.as_deref().unwrap_or("").to_lowercase().contains(pat)
+                                        || d.serial_number.as_deref().unwrap_or("").to_lowercase().contains(pat)
+                                        || d.description.to_lowercase().contains(pat)
+                                })
+                            } else {
+                                None
+                            };
+
+                            let best = matched
+                                .or_else(|| available.iter().find(|d| d.is_esp))
                                 .or_else(|| available.iter().find(|d| d.is_arduino))
                                 .or_else(|| available.first());
+
                             match best {
                                 Some(dev) => dev.port_name.clone(),
                                 None => {
@@ -478,7 +542,11 @@ async fn handle_http_request(
                             "session_id": sess.session_id,
                             "port": target_port,
                             "baud": sess.baud_rate,
-                            "message": "Cihaz zaten bağlı, mevcut oturum döndürüldü."
+                            "safe_connect": true,
+                            "reset_on_connect": false,
+                            "dtr_neutral": true,
+                            "rts_neutral": true,
+                            "message": "Cihaz zaten bağlı, mevcut oturum döndürüldü (Reset kapalı, RTS/DTR nötr)."
                         });
                         return ("200 OK", "application/json", resp.to_string());
                     }
@@ -513,14 +581,24 @@ async fn handle_http_request(
                                     "sessionId": s_id,
                                     "port": target_port,
                                     "baudRate": baud,
-                                    "resetOnConnect": reset
+                                    "resetOnConnect": reset,
+                                    "safeConnect": !reset
                                 }),
                             );
                             let resp = serde_json::json!({
                                 "ok": true,
                                 "session_id": s_id,
                                 "port": target_port,
-                                "baud": baud
+                                "baud": baud,
+                                "safe_connect": !reset,
+                                "reset_on_connect": reset,
+                                "dtr_neutral": true,
+                                "rts_neutral": true,
+                                "message": if reset {
+                                    "⚠️ Resetli bağlantı kuruldu (EN darbesi verildi)."
+                                } else {
+                                    "🛡️ Güvenli bağlantı kuruldu (Donanımsal reset kapalı, RTS/DTR nötr)."
+                                }
                             });
                             ("200 OK", "application/json", resp.to_string())
                         }
@@ -532,6 +610,78 @@ async fn handle_http_request(
                 }
                 Err(e) => {
                     let resp = serde_json::json!({ "ok": false, "error": format!("Invalid JSON: {}", e) });
+                    ("400 Bad Request", "application/json", resp.to_string())
+                }
+            }
+        }
+
+        // 4b. Non-destructive Chip & Protocol Probe (Zero Reset)
+        ("GET", "/api/probe") | ("GET", "/api/ports/probe") | ("POST", "/api/probe") => {
+            #[derive(Deserialize, Default)]
+            struct ProbeReq {
+                port: Option<String>,
+                baud: Option<u32>,
+            }
+            let mut req_port = None;
+            let mut req_baud = None;
+            if method == "POST" {
+                if let Ok(p) = serde_json::from_str::<ProbeReq>(body) {
+                    req_port = p.port;
+                    req_baud = p.baud;
+                }
+            }
+            for pair in query.split('&') {
+                let mut kv = pair.split('=');
+                if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                    if (k == "port" || k == "port_name") && req_port.is_none() {
+                        req_port = Some(v.to_string());
+                    } else if (k == "baud" || k == "baud_rate") && req_baud.is_none() {
+                        req_baud = v.parse::<u32>().ok();
+                    }
+                }
+            }
+
+            let available = state.serial_manager.scan_ports("");
+            let target_port = match req_port.as_deref() {
+                Some(p) if !p.trim().is_empty() && p.to_lowercase() != "auto" => p.to_string(),
+                _ => {
+                    let best = available.iter().find(|d| d.is_esp)
+                        .or_else(|| available.iter().find(|d| d.is_arduino))
+                        .or_else(|| available.first());
+                    match best {
+                        Some(dev) => dev.port_name.clone(),
+                        None => {
+                            let resp = serde_json::json!({
+                                "ok": false,
+                                "error": "Sorgulanacak seri port bulunamadı"
+                            });
+                            return ("400 Bad Request", "application/json", resp.to_string());
+                        }
+                    }
+                }
+            };
+
+            let baud = req_baud.unwrap_or(115200);
+            match state.serial_manager.probe_port(&target_port, baud) {
+                Ok(probe_result) => {
+                    let resp = serde_json::json!({
+                        "ok": true,
+                        "probe": probe_result,
+                        "port": target_port,
+                        "baud": baud,
+                        "safe_probe": true,
+                        "dtr_neutral": true,
+                        "rts_neutral": true,
+                        "message": "Port güvenli şekilde (reset tetiklenmeden) sorgulandı."
+                    });
+                    ("200 OK", "application/json", resp.to_string())
+                }
+                Err(e) => {
+                    let resp = serde_json::json!({
+                        "ok": false,
+                        "port": target_port,
+                        "error": e
+                    });
                     ("400 Bad Request", "application/json", resp.to_string())
                 }
             }
@@ -551,6 +701,7 @@ async fn handle_http_request(
 
             if let Some(id) = s_id {
                 let _ = state.serial_manager.disconnect_session(&id);
+                reconcile_models(state);
                 let _ = state.app_handle.emit(
                     "ai-action",
                     serde_json::json!({ "type": "disconnect", "sessionId": id }),
@@ -558,9 +709,41 @@ async fn handle_http_request(
                 let resp = serde_json::json!({ "ok": true, "session_id": id });
                 ("200 OK", "application/json", resp.to_string())
             } else {
+                reconcile_models(state);
                 let resp = serde_json::json!({ "ok": false, "error": "No active session to disconnect" });
                 ("400 Bad Request", "application/json", resp.to_string())
             }
+        }
+
+        // 5b. Cancel Ongoing Transmission or Command
+        ("POST", "/api/cancel") | ("POST", "/api/abort") => {
+            #[derive(Deserialize)]
+            struct CancelReq {
+                session_id: Option<String>,
+            }
+            let s_id = serde_json::from_str::<CancelReq>(body)
+                .ok()
+                .and_then(|r| r.session_id)
+                .or_else(|| state.serial_manager.get_first_session_id());
+
+            if let Some(ref id) = s_id {
+                state.serial_manager.cancel_session(id);
+            } else {
+                state.serial_manager.cancel_all();
+            }
+
+            let _ = state.app_handle.emit(
+                "ai-action",
+                serde_json::json!({ "type": "cancel", "sessionId": s_id }),
+            );
+
+            let resp = serde_json::json!({
+                "ok": true,
+                "cancelled": true,
+                "session_id": s_id,
+                "message": "Devam eden seri işlem / aktarım iptal edildi."
+            });
+            ("200 OK", "application/json", resp.to_string())
         }
 
         // 6. Send Serial Data (Supports Single-line & Multiline with Delay)
@@ -643,7 +826,7 @@ async fn handle_http_request(
             }
         }
 
-        // 7. Interactive Command Execution (Send & Collect Output)
+        // 7. Interactive Command Execution (Send, Stream Output, & Track 3-Stage Lifecycle)
         ("POST", "/api/exec") => {
             #[derive(Deserialize)]
             struct ExecReq {
@@ -652,6 +835,8 @@ async fn handle_http_request(
                 lines: Option<Vec<String>>,
                 timeout_ms: Option<u64>,
                 expect: Option<String>,
+                verify_expect: Option<String>,
+                start_expect: Option<String>,
                 line_delay_ms: Option<u64>,
                 eol: Option<String>,
                 session_id: Option<String>,
@@ -664,7 +849,8 @@ async fn handle_http_request(
                         .or_else(|| state.serial_manager.get_first_session_id());
 
                     if let Some(id) = s_id {
-                        let timeout = Duration::from_millis(ereq.timeout_ms.unwrap_or(2000).clamp(100, 60000));
+                        // Timeout up to 300,000 ms (5 min) for large transfers
+                        let timeout = Duration::from_millis(ereq.timeout_ms.unwrap_or(5000).clamp(100, 300_000));
                         let delay = ereq.line_delay_ms.unwrap_or(25);
                         let eol = ereq.eol.unwrap_or_else(|| "\r\n".to_string());
 
@@ -681,23 +867,105 @@ async fn handle_http_request(
                             return ("400 Bad Request", "application/json", resp.to_string());
                         }
 
+                        // Reset any lingering cancel flag before starting execution
+                        state.serial_manager.reset_cancel_flag(&id);
+
                         let start_count = state.serial_manager.get_total_lines_count(&id).unwrap_or(0);
-                        let start_time = std::time::Instant::now();
+                        let upload_start_time = std::time::Instant::now();
 
-                        if let Err(e) = state.serial_manager.send_multiline(&id, &lines_to_send, &eol, delay) {
-                            let resp = serde_json::json!({ "ok": false, "error": e });
-                            return ("400 Bad Request", "application/json", resp.to_string());
-                        }
+                        // --- Stage 1: Yüklendi (Payload Transmission) ---
+                        let sent_bytes = match state.serial_manager.send_multiline(&id, &lines_to_send, &eol, delay) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                let upload_elapsed = upload_start_time.elapsed().as_millis() as u64;
+                                let is_cancelled = state.serial_manager.is_cancelled(&id);
+                                let resp = serde_json::json!({
+                                    "ok": false,
+                                    "cancelled": is_cancelled,
+                                    "passed": false,
+                                    "error": e,
+                                    "stages": {
+                                        "uploaded": {
+                                            "name": "Yüklendi (Payload Gönderimi)",
+                                            "status": if is_cancelled { "cancelled" } else { "failed" },
+                                            "message": e,
+                                            "elapsed_ms": upload_elapsed
+                                        },
+                                        "started": {
+                                            "name": "Başlatıldı (Yürütme Akışı)",
+                                            "status": "pending",
+                                            "message": "Yükleme tamamlanamadığı için başlatılamadı",
+                                            "elapsed_ms": 0
+                                        },
+                                        "verified": {
+                                            "name": "Doğrulandı (Oynatma/Sonuç)",
+                                            "status": "pending",
+                                            "message": "Doğrulama aşamasına geçilemedi",
+                                            "elapsed_ms": 0
+                                        }
+                                    }
+                                });
+                                return ("400 Bad Request", "application/json", resp.to_string());
+                            }
+                        };
+                        let upload_duration_ms = upload_start_time.elapsed().as_millis() as u64;
 
+                        // --- Stages 2 & 3: Başlatıldı (Started) & Doğrulandı (Verified) ---
+                        let exec_start_time = std::time::Instant::now();
+                        let mut started_detected = false;
+                        let mut started_at_ms: Option<u64> = None;
                         let mut matched_expect = false;
+                        let mut verified_at_ms: Option<u64> = None;
                         let mut response_lines = Vec::new();
+                        let mut was_cancelled = false;
 
-                        while start_time.elapsed() < timeout {
+                        let verify_target = ereq.verify_expect.as_ref().or(ereq.expect.as_ref());
+                        let start_target = ereq.start_expect.as_ref();
+                        let mut last_stream_count = 0;
+
+                        while exec_start_time.elapsed() < timeout {
+                            // Support cancellation mid-wait
+                            if state.serial_manager.is_cancelled(&id) {
+                                was_cancelled = true;
+                                break;
+                            }
+
                             std::thread::sleep(Duration::from_millis(25));
                             let current = state.serial_manager.get_lines_since(&id, start_count);
-                            if let Some(ref exp) = ereq.expect {
-                                if current.iter().any(|l| l.contains(exp)) {
+
+                            // Detect Started stage
+                            if !started_detected && !current.is_empty() {
+                                if let Some(ref st_exp) = start_target {
+                                    if current.iter().any(|l| l.contains(st_exp.as_str())) {
+                                        started_detected = true;
+                                        started_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                    }
+                                } else {
+                                    started_detected = true;
+                                    started_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                }
+                            }
+
+                            // Stream live lines to UI
+                            if current.len() > last_stream_count {
+                                let new_lines = current[last_stream_count..].to_vec();
+                                last_stream_count = current.len();
+                                let _ = state.app_handle.emit(
+                                    "ai-exec-stream",
+                                    serde_json::json!({
+                                        "sessionId": id,
+                                        "newLines": new_lines,
+                                        "totalLines": current.len(),
+                                        "elapsedMs": exec_start_time.elapsed().as_millis() as u64
+                                    }),
+                                );
+                            }
+
+                            // Detect Verification stage
+                            if let Some(exp) = verify_target {
+                                if current.iter().any(|l| l.contains(exp.as_str())) {
                                     matched_expect = true;
+                                    verified_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
                                     response_lines = current;
                                     break;
                                 }
@@ -705,18 +973,94 @@ async fn handle_http_request(
                             response_lines = current;
                         }
 
-                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        let exec_duration_ms = exec_start_time.elapsed().as_millis() as u64;
+                        let total_duration_ms = upload_duration_ms + exec_duration_ms;
                         let response_text = response_lines.join("\n");
 
+                        let uploaded_stage = serde_json::json!({
+                            "name": "Yüklendi (Payload & CRC)",
+                            "status": "passed",
+                            "message": format!("{} satır ({} bayt) başarıyla aktarıldı", lines_to_send.len(), sent_bytes),
+                            "elapsed_ms": upload_duration_ms
+                        });
+
+                        let started_stage = if started_detected {
+                            serde_json::json!({
+                                "name": "Başlatıldı (Yürütme Akışı)",
+                                "status": "passed",
+                                "message": "Cihaz yürütmeye başladı (çıktı akışı doğrulandı)",
+                                "elapsed_ms": started_at_ms.unwrap_or(exec_duration_ms)
+                            })
+                        } else if was_cancelled {
+                            serde_json::json!({
+                                "name": "Başlatıldı (Yürütme Akışı)",
+                                "status": "cancelled",
+                                "message": "İşlem iptal edildi",
+                                "elapsed_ms": exec_duration_ms
+                            })
+                        } else {
+                            serde_json::json!({
+                                "name": "Başlatıldı (Yürütme Akışı)",
+                                "status": "waiting",
+                                "message": "Cihazdan henüz çıktı satırı gelmedi",
+                                "elapsed_ms": exec_duration_ms
+                            })
+                        };
+
+                        let verified_stage = if let Some(exp) = verify_target {
+                            if matched_expect {
+                                serde_json::json!({
+                                    "name": "Doğrulandı (Oynatma/Sonuç)",
+                                    "status": "passed",
+                                    "message": format!("Beklenen yanıt doğrulandı: '{}'", exp),
+                                    "elapsed_ms": verified_at_ms.unwrap_or(exec_duration_ms)
+                                })
+                            } else if was_cancelled {
+                                serde_json::json!({
+                                    "name": "Doğrulandı (Oynatma/Sonuç)",
+                                    "status": "cancelled",
+                                    "message": "Doğrulama tamamlanmadan iptal edildi",
+                                    "elapsed_ms": exec_duration_ms
+                                })
+                            } else {
+                                serde_json::json!({
+                                    "name": "Doğrulandı (Oynatma/Sonuç)",
+                                    "status": "unverified",
+                                    "message": format!("Doğrulama zaman aşımına uğradı ('{}' bulunamadı, {}ms)", exp, timeout.as_millis()),
+                                    "elapsed_ms": exec_duration_ms
+                                })
+                            }
+                        } else {
+                            serde_json::json!({
+                                "name": "Doğrulandı (Oynatma/Sonuç)",
+                                "status": "skipped",
+                                "message": "Özel doğrulama kriteri (expect) belirtilmedi",
+                                "elapsed_ms": 0
+                            })
+                        };
+
+                        // ok: technical success without crash or fatal error
+                        // passed: whether assertions passed
+                        let passed = if verify_target.is_some() { matched_expect } else { true };
+
                         let resp = serde_json::json!({
-                            "ok": true,
+                            "ok": !was_cancelled,
+                            "cancelled": was_cancelled,
+                            "passed": passed,
                             "command": lines_to_send.join("\n"),
                             "response_lines": response_lines,
                             "response_text": response_text,
                             "line_count": response_lines.len(),
-                            "duration_ms": duration_ms,
+                            "duration_ms": total_duration_ms,
+                            "upload_duration_ms": upload_duration_ms,
+                            "exec_duration_ms": exec_duration_ms,
                             "matched_expect": matched_expect,
-                            "session_id": id
+                            "session_id": id,
+                            "stages": {
+                                "uploaded": uploaded_stage,
+                                "started": started_stage,
+                                "verified": verified_stage
+                            }
                         });
                         ("200 OK", "application/json", resp.to_string())
                     } else {
@@ -1087,6 +1431,7 @@ async fn handle_http_request(
 
         // 16. Connected AI Models Peer Directory (Cross-Model Visibility)
         ("GET", "/api/ai-models") => {
+            reconcile_models(state);
             let models = state.ai_models.lock().unwrap();
             let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
             let list: Vec<serde_json::Value> = models

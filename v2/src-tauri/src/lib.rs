@@ -29,6 +29,25 @@ fn connect_port(
 }
 
 #[tauri::command]
+fn cancel_active_session(manager: State<'_, Arc<SerialManager>>, session_id: Option<String>) -> bool {
+    if let Some(id) = session_id {
+        manager.cancel_session(&id)
+    } else {
+        manager.cancel_all();
+        true
+    }
+}
+
+#[tauri::command]
+fn probe_port_cmd(
+    manager: State<'_, Arc<SerialManager>>,
+    port_name: String,
+    baud_rate: Option<u32>,
+) -> Result<serial::PortProbeResult, String> {
+    manager.probe_port(&port_name, baud_rate.unwrap_or(115200))
+}
+
+#[tauri::command]
 fn disconnect_port(manager: State<'_, Arc<SerialManager>>, session_id: String) -> Result<(), String> {
     manager.disconnect_session(&session_id)
 }
@@ -270,6 +289,8 @@ pub fn run() {
             get_ai_skill_guide,
             install_smp_cli_cmd,
             get_smp_cli_status_cmd,
+            cancel_active_session,
+            probe_port_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

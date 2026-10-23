@@ -1233,19 +1233,44 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             {panel.isConnected ? t('disconnect', lang) : t('connect', lang)}
           </button>
 
-          {/* Reset On Connect */}
-          <label
-            className="flex items-center gap-1 cursor-pointer select-none text-[11px] text-slate-300 hover:text-sky-300 transition-colors"
-            title={t('resetOnConnectTip', lang)}
+          {/* Safe Connect Mode Badge / Toggle */}
+          <button
+            type="button"
+            onClick={() => onUpdatePanel(panel.id, { resetOnConnect: !panel.resetOnConnect })}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono font-medium transition cursor-pointer select-none shadow-sm ${
+              panel.resetOnConnect
+                ? 'bg-amber-950/80 border border-amber-500/60 text-amber-300 hover:bg-amber-900/90'
+                : 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/90'
+            }`}
+            title={
+              panel.resetOnConnect
+                ? (lang === 'tr'
+                    ? '⚠️ Resetli Bağlantı Açık: Bağlanırken EN darbesi ile kart sıfırlanır. Tıklayarak güvenli (resetsiz) moda dönebilirsiniz.'
+                    : '⚠️ Reset on Connect Active: EN pulse will reset chip on open. Click to switch to Safe Connect.')
+                : (lang === 'tr'
+                    ? '🛡️ Güvenli Bağlantı (Reset Kapalı): RTS ve DTR sinyalleri nötr tutulur, karta donanımsal reset ASLA verilmez. Tıklayarak resetli moda geçebilirsiniz.'
+                    : '🛡️ Safe Connect (Reset Disabled): Neutral RTS/DTR lines guaranteed, zero reset. Click to toggle reset.')
+            }
           >
-            <input
-              type="checkbox"
-              checked={panel.resetOnConnect}
-              onChange={(e) => onUpdatePanel(panel.id, { resetOnConnect: e.target.checked })}
-              className="rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
-            />
-            <span>{t('resetOnConnect', lang)}</span>
-          </label>
+            <span className={`w-1.5 h-1.5 rounded-full ${panel.resetOnConnect ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+            <span>
+              {panel.resetOnConnect
+                ? (lang === 'tr' ? '⚠️ Resetli Bağlantı' : '⚠️ Reset Active')
+                : (lang === 'tr' ? '🛡️ Güvenli Bağlantı (Reset Kapalı)' : '🛡️ Safe Connect (No Reset)')}
+            </span>
+          </button>
+
+          {/* Connected Signals Indicator (DTR / RTS) */}
+          {panel.isConnected && (
+            <div
+              className="flex items-center gap-1 text-[10px] font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 shrink-0"
+              title={lang === 'tr' ? 'UART Donanım Kontrol Hatları (Nötr / Reset Yok)' : 'UART Control Lines (Neutral / Zero Reset)'}
+            >
+              <span className="text-emerald-400 font-bold">DTR: 0</span>
+              <span className="text-slate-600">|</span>
+              <span className="text-emerald-400 font-bold">RTS: 0</span>
+            </div>
+          )}
 
           {/* Auto Reconnect */}
           <label
@@ -1316,26 +1341,45 @@ export const LogPanel: React.FC<LogPanelProps> = ({
             <span className="text-[10px] text-slate-400 font-mono">{t('autoCloseSeconds', lang)}</span>
           </div>
 
+          {/* Abort / Cancel Transfer Button */}
+          {panel.isConnected && (
+            <button
+              onClick={async () => {
+                try {
+                  await invoke('cancel_active_session', { sessionId: panel.id });
+                  onNotification(lang === 'tr' ? '⚠️ Devam eden aktarım durduruldu (İptal).' : '⚠️ Ongoing transfer cancelled.');
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+              className="flex items-center gap-1 px-2 py-1 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded text-[11px] font-mono transition cursor-pointer"
+              title={lang === 'tr' ? 'Devam eden çok satırlı gönderimi veya işlemi iptal et' : 'Abort ongoing send or exec operation'}
+            >
+              <X className="w-3 h-3 text-rose-400" />
+              <span>{lang === 'tr' ? 'İptal' : 'Abort'}</span>
+            </button>
+          )}
+
           {/* Hardware Reset (EN) */}
           <button
             onClick={handleHardwareReset}
             disabled={!panel.isConnected}
-            className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700/50 rounded disabled:opacity-40 transition-colors font-mono font-medium text-[11px]"
             title={t('hwResetTip', lang)}
           >
             <RotateCcw className="w-3 h-3 text-amber-400" />
-            <span>EN</span>
+            <span>⚡ EN Reset</span>
           </button>
 
           {/* Bootloader Mode (IO0) */}
           <button
             onClick={handleBootloader}
             disabled={!panel.isConnected}
-            className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-700/50 rounded disabled:opacity-40 transition-colors font-mono font-medium text-[11px]"
             title={t('bootloaderTip', lang)}
           >
             <Sparkles className="w-3 h-3 text-purple-400" />
-            <span>IO0</span>
+            <span>IO0 Boot</span>
           </button>
         </div>
       </div>
