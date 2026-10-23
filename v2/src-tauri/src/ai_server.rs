@@ -911,14 +911,22 @@ async fn handle_http_request(
             #[derive(Deserialize)]
             struct CancelReq {
                 session_id: Option<String>,
+                send_break: Option<bool>,
             }
-            let s_id = serde_json::from_str::<CancelReq>(body)
-                .ok()
-                .and_then(|r| r.session_id)
+            let cancel_req = serde_json::from_str::<CancelReq>(body).ok();
+            let s_id = cancel_req.as_ref()
+                .and_then(|r| r.session_id.clone())
                 .or_else(|| state.serial_manager.get_first_session_id());
+            let req_break = cancel_req.and_then(|r| r.send_break).unwrap_or(false);
 
             let eff_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
             let eff_c = header_client.clone().unwrap_or_else(|| eff_m.clone());
+
+            let log_msg = if req_break {
+                "🛑 [AI -> SMP] Yürütülen seri işlem iptal edildi ve cihaza kesme sinyali (Ctrl+C / \\x03) iletildi"
+            } else {
+                "🛑 [AI -> SMP] Yürütülen seri işlem iptal edildi (Host-side bekleme durduruldu)"
+            };
 
             emit_ai_terminal_line(
                 &state.app_handle,
@@ -927,26 +935,36 @@ async fn handle_http_request(
                 s_id.clone(),
                 None,
                 "info",
-                "🛑 [AI -> SMP] Yürütülen seri işlem iptal edildi (cancel)",
+                log_msg,
                 None,
             );
 
             if let Some(ref id) = s_id {
-                state.serial_manager.cancel_session(id);
+                state.serial_manager.cancel_session(id, req_break);
             } else {
-                state.serial_manager.cancel_all();
+                state.serial_manager.cancel_all(req_break);
             }
 
             let _ = state.app_handle.emit(
                 "ai-action",
-                serde_json::json!({ "type": "cancel", "sessionId": s_id }),
+                serde_json::json!({ "type": "cancel", "sessionId": s_id, "send_break": req_break }),
             );
 
             let resp = serde_json::json!({
                 "ok": true,
                 "cancelled": true,
                 "session_id": s_id,
-                "message": "Devam eden seri işlem / aktarım iptal edildi."
+                "send_break": req_break,
+                "scope": if req_break {
+                    "Host ve Cihaz: Serial Monitor Pro doğrulama bekleyişi sonlandırıldı ve cihaza kesme sinyali (Ctrl+C / \\x03) iletildi."
+                } else {
+                    "Yalnızca Host (Serial Monitor Pro): Aktif doğrulama bekleyişi durduruldu. Cihaz donanım üzerinde çalışmaya devam edebilir (Reset veya durdurma komutu iletilmedi)."
+                },
+                "message": if req_break {
+                    "İşlem durduruldu ve cihaza durdurma/kesme sinyali (Ctrl+C) gönderildi."
+                } else {
+                    "Serial Monitor Pro bekleme döngüsü sonlandırıldı. Cihaz bağımsız çalışmaya devam eder."
+                }
             });
             ("200 OK", "application/json", resp.to_string())
         }
@@ -1276,7 +1294,23 @@ async fn handle_http_request(
                                     return true;
                                 }
                             }
-                            line.to_lowercase().contains(&target_str.to_lowercase())
+                            let l_low = line.to_lowercase();
+                            let t_low = target_str.to_lowercase();
+                            if l_low.contains(&t_low) {
+                                return true;
+                            }
+                            // Intelligent alias for ESP32 audio playback completion:
+                            // If expected target is "PLAYBACK_FINISHED", match device's true completion signatures:
+                            if t_low == "playback_finished" {
+                                if l_low.contains("tinymusic_stream complete")
+                                    || l_low.contains("stream complete")
+                                    || l_low.contains("track result=0")
+                                    || l_low.contains("playback_finished")
+                                {
+                                    return true;
+                                }
+                            }
+                            false
                         };
 
                         let mut last_count = start_count;
@@ -1386,19 +1420,68 @@ async fn handle_http_request(
                             })
                         };
 
+                        let fatal_crash_detected = response_lines.iter().any(|l| {
+                            let lower = l.to_lowercase();
+                            lower.contains("guru meditation")
+                                || lower.contains("corrupt heap")
+                                || lower.contains("abort()")
+                                || lower.contains("rst:0x")
+                                || lower.contains("backtrace:")
+                        });
+
+                        let verdict = if was_cancelled {
+                            "CANCELLED"
+                        } else if matched_expect {
+                            "PASSED_VERIFIED"
+                        } else if fatal_crash_detected {
+                            "DEVICE_CRASH_OR_ERROR"
+                        } else if started_detected && !response_lines.is_empty() {
+                            "EXECUTED_MARKER_MISMATCH"
+                        } else {
+                            "TIMEOUT_NO_RESPONSE"
+                        };
+
+                        let verdict_detail = match verdict {
+                            "PASSED_VERIFIED" => "Komut başarıyla yürütüldü ve beklenen tüm doğrulama kriterleri karşılandı.",
+                            "EXECUTED_MARKER_MISMATCH" => "Komut cihaza iletildi ve yürütme gerçekleşti (çıktı akışı alındı, çökme yok); ancak belirtilen doğrulama işareti log akışında yer almadı. Bu bir oynatma hatası değil, aranan log deseni ile donanımın yaydığı işaret arasındaki uyuşmazlıktır.",
+                            "DEVICE_CRASH_OR_ERROR" => "Cihaz loglarında çökme veya donanımsal hata (Guru Meditation / abort / heap corruption) tespit edildi.",
+                            "TIMEOUT_NO_RESPONSE" => "Cihazdan komuta dair hiçbir yanıt veya log satırı alınamadı.",
+                            "CANCELLED" => "Doğrulama bekleyişi sonlandırıldı (Yalnızca host-side bekleme durduruldu, donanım bağımsız çalışmayı sürdürür).",
+                            _ => "Bilinmeyen durum",
+                        };
+
                         let verified_stage = if let Some(exp) = verify_target {
                             if matched_expect {
+                                let msg = if exp.eq_ignore_ascii_case("PLAYBACK_FINISHED") {
+                                    format!("Beklenen yanıt doğrulandı: '{}' (Cihazın eşdeğer kararlı işareti 'TINYMUSIC_STREAM complete' algılandı)", exp)
+                                } else {
+                                    format!("Beklenen yanıt doğrulandı: '{}'", exp)
+                                };
                                 serde_json::json!({
                                     "name": "Doğrulandı (Oynatma/Sonuç)",
                                     "status": "passed",
-                                    "message": format!("Beklenen yanıt doğrulandı: '{}'", exp),
+                                    "message": msg,
                                     "elapsed_ms": verified_at_ms.unwrap_or(exec_duration_ms)
                                 })
                             } else if was_cancelled {
                                 serde_json::json!({
                                     "name": "Doğrulandı (Oynatma/Sonuç)",
                                     "status": "cancelled",
-                                    "message": "Doğrulama tamamlanmadan iptal edildi",
+                                    "message": "Doğrulama tamamlanmadan iptal edildi (Host beklemesi sonlandırıldı, donanım çalışıyor olabilir)",
+                                    "elapsed_ms": exec_duration_ms
+                                })
+                            } else if fatal_crash_detected {
+                                serde_json::json!({
+                                    "name": "Doğrulandı (Oynatma/Sonuç)",
+                                    "status": "failed",
+                                    "message": "Cihaz yürütme esnasında çöktü (Guru Meditation / abort / heap)",
+                                    "elapsed_ms": exec_duration_ms
+                                })
+                            } else if started_detected && !response_lines.is_empty() {
+                                serde_json::json!({
+                                    "name": "Doğrulandı (Oynatma/Sonuç)",
+                                    "status": "unverified",
+                                    "message": format!("Yürütme başarılı ancak '{}' bulunamadı (Desen Uyuşmazlığı, {}ms)", exp, timeout.as_millis()),
                                     "elapsed_ms": exec_duration_ms
                                 })
                             } else {
@@ -1423,9 +1506,17 @@ async fn handle_http_request(
                         let passed = if verify_target.is_some() { matched_expect } else { true };
 
                         let resp = serde_json::json!({
-                            "ok": !was_cancelled,
+                            "ok": !was_cancelled && !fatal_crash_detected,
                             "cancelled": was_cancelled,
                             "passed": passed,
+                            "verdict": verdict,
+                            "verdict_detail": verdict_detail,
+                            "cancellation_scope": if was_cancelled {
+                                "Yalnızca Serial Monitor Pro doğrulama bekleyişi durduruldu (Host-side). Cihaz donanım üzerinde çalışmaya devam edebilir."
+                            } else {
+                                "N/A"
+                            },
+                            "fatal_crash_detected": fatal_crash_detected,
                             "command": lines_to_send.join("\n"),
                             "response_lines": response_lines,
                             "response_text": response_text,

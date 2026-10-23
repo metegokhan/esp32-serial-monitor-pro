@@ -48,6 +48,10 @@ pub struct PortProbeResult {
     pub response_sample: String,
     pub chip_family: String,
     pub device_info: Option<SerialDeviceInfo>,
+    #[serde(default)]
+    pub is_active_session: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -425,19 +429,35 @@ impl SerialManager {
         Ok(())
     }
 
-    pub fn cancel_session(&self, session_id: &str) -> bool {
+    pub fn cancel_session(&self, session_id: &str, send_break: bool) -> bool {
         let map = self.sessions.lock().unwrap();
         if let Some(session) = map.get(session_id) {
             session.cancel_flag.store(true, Ordering::SeqCst);
+            if send_break {
+                if let Ok(mut writer) = session.port_writer.lock() {
+                    if let Some(ref mut p) = *writer {
+                        let _ = p.write_all(b"\x03\r\n");
+                        let _ = p.flush();
+                    }
+                }
+            }
             return true;
         }
         false
     }
 
-    pub fn cancel_all(&self) {
+    pub fn cancel_all(&self, send_break: bool) {
         let map = self.sessions.lock().unwrap();
         for session in map.values() {
             session.cancel_flag.store(true, Ordering::SeqCst);
+            if send_break {
+                if let Ok(mut writer) = session.port_writer.lock() {
+                    if let Some(ref mut p) = *writer {
+                        let _ = p.write_all(b"\x03\r\n");
+                        let _ = p.flush();
+                    }
+                }
+            }
         }
     }
 
@@ -594,13 +614,17 @@ impl SerialManager {
             let map = self.sessions.lock().unwrap();
             if let Some(session) = map.values().find(|s| s.port_name == port_name) {
                 let sample = session.recent_lines.lock().unwrap().back().cloned().unwrap_or_default();
+                let rx = session.rx_bytes.load(Ordering::SeqCst);
+                let lines = session.total_lines_received.load(Ordering::SeqCst);
                 return Ok(PortProbeResult {
                     port_name: port_name.to_string(),
                     baud_rate: session.baud_rate,
                     responsive: true,
-                    response_sample: sample,
+                    response_sample: if sample.is_empty() { format!("(Açık Oturum: {} bayt, {} satır alındı)", rx, lines) } else { sample },
                     chip_family,
                     device_info: dev_info,
+                    is_active_session: true,
+                    active_session_id: Some(session.session_id.clone()),
                 });
             }
         }
@@ -622,6 +646,8 @@ impl SerialManager {
             response_sample: response.trim().to_string(),
             chip_family,
             device_info: dev_info,
+            is_active_session: false,
+            active_session_id: None,
         })
     }
 

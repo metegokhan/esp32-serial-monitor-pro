@@ -290,7 +290,15 @@ def main():
                 pr = res.get("probe", {})
                 print(f"🔍 [KİMLİK & PROTOKOL SORGUSU] Port: {pr.get('port_name')} @ {pr.get('baud_rate')} baud")
                 print(f"  • Yonga Ailesi : {pr.get('chip_family')}")
-                print(f"  • Yanıt Durumu : {'✅ Yanıt Alındı' if pr.get('responsive') else '⚠️ Yanıt Yok (Sessiz)'}")
+                if pr.get("is_active_session"):
+                    sess_id = pr.get("active_session_id", "aktif")
+                    print(f"  • Oturum       : 🟢 Açık ve Aktif ({sess_id})")
+                    print(f"  • Yanıt Durumu : ✅ Aktif Akış Alınıyor (Cihaz çalışıyor)")
+                else:
+                    if pr.get('responsive'):
+                        print(f"  • Yanıt Durumu : ✅ Yanıt Alındı (Echo/Boot çıktısı)")
+                    else:
+                        print(f"  • Yanıt Durumu : ℹ️ Pasif / Sessiz (Echo yok, donanım ve port hazır)")
                 dev = pr.get("device_info") or {}
                 if dev.get("serial_number"):
                     print(f"  • Seri No      : {dev.get('serial_number')}")
@@ -311,10 +319,33 @@ def main():
         print_result(request("/api/disconnect", "POST", data))
 
     elif cmd in ("cancel", "abort"):
-        session_id = args[1] if len(args) > 1 and not args[1].startswith("-") else None
-        data = {"session_id": session_id} if session_id else {}
+        session_id = None
+        send_break = False
+        json_output = False
+        for a in args[1:]:
+            if a in ("--break", "-b", "--stop"):
+                send_break = True
+            elif a == "--json":
+                json_output = True
+            elif not a.startswith("-") and not session_id:
+                session_id = a
+        data = {"send_break": send_break}
+        if session_id:
+            data["session_id"] = session_id
         res = request("/api/cancel", "POST", data)
-        print_result(res)
+        if json_output:
+            print_result(res)
+        else:
+            if isinstance(res, dict) and res.get("ok"):
+                print("🛑 [İPTAL EDİLDİ]")
+                print(f"  • Kapsam       : {res.get('scope', 'Doğrulama bekleyişi sonlandırıldı')}")
+                if res.get("send_break"):
+                    print("  • Donanım      : ⚡ ESP32'ye kesme / durdurma sinyali (Ctrl+C / \\x03) iletildi.")
+                else:
+                    print("  • Cihaz Durumu : ℹ️ ESP32 donanım üzerinde çalışmaya devam edebilir (Durdurma komutu veya reset iletilmedi).")
+                    print("  • İpucu        : Cihazı da durdurmak için: 'smp cancel --break' veya 'smp reset' kullanın.")
+            else:
+                print_result(res)
 
     elif cmd == "send":
         session_id = None
@@ -470,7 +501,29 @@ def main():
                     ok_status = "✅ OK (Teknik Başarılı)" if res.get("ok") else "❌ HATA"
                     passed_status = "✅ DOĞRULANDI" if res.get("passed") else ("❓ DOĞRULANMADI" if expect_str else "⚪ BEKLENTİ YOK")
                     print(f"Teknik Sonuç: {ok_status} | Doğrulama: {passed_status} | Toplam Süre: {res.get('duration_ms', 0)}ms")
-                    if res.get("cancelled"):
+
+                    verdict = res.get("verdict")
+                    verdict_detail = res.get("verdict_detail")
+                    if verdict:
+                        print("\n📊 Teşhis ve Değerlendirme:")
+                        if verdict == "PASSED_VERIFIED":
+                            print("  ✅ [BAŞARILI] Komut yürütüldü ve tüm doğrulama kriterleri karşılandı.")
+                        elif verdict == "EXECUTED_MARKER_MISMATCH":
+                            print(f"  ⚠️ [İŞARET UYUŞMAZLIĞI] Komut cihazda başarıyla çalıştı ve log üretti (Çökme yok).")
+                            print(f"     Ancak aranan '{expect_str}' deseni log akışında görülmedi.")
+                            print("     Öneri: Donanımın kararlı tamamlama işaretini kullanın: --expect \"TINYMUSIC_STREAM complete\"")
+                        elif verdict == "DEVICE_CRASH_OR_ERROR":
+                            print("  ❌ [CİHAZ HATASI] Cihaz çıktısında çökme veya panic (Guru Meditation / abort / heap) tespit edildi!")
+                        elif verdict == "TIMEOUT_NO_RESPONSE":
+                            print("  ⏳ [YANITSIZ ZAMAN AŞIMI] Komuta karşılık cihazdan hiçbir satır gelmedi.")
+                        elif verdict == "CANCELLED":
+                            print("  🛑 [İPTAL EDİLDİ] Yalnızca Serial Monitor Pro doğrulama bekleyişi durduruldu (Host-side).")
+                            print("     ESP32 mikrodenetleyicisi donanım üzerindeki görevini sürdürmektedir.")
+                            print("     Cihazı da durdurmak isterseniz: 'smp cancel --break' veya 'smp reset' kullanın.")
+
+                        if verdict_detail and verdict not in ("PASSED_VERIFIED",):
+                            print(f"  • Detay: {verdict_detail}")
+                    elif res.get("cancelled"):
                         print("⚠️ [İPTAL BİLGİSİ] Komut veya aktarım kullanıcı tarafından iptal edildi.")
                 else:
                     print_result(res)

@@ -29,11 +29,12 @@ fn connect_port(
 }
 
 #[tauri::command]
-fn cancel_active_session(manager: State<'_, Arc<SerialManager>>, session_id: Option<String>) -> bool {
+fn cancel_active_session(manager: State<'_, Arc<SerialManager>>, session_id: Option<String>, send_break: Option<bool>) -> bool {
+    let sb = send_break.unwrap_or(false);
     if let Some(id) = session_id {
-        manager.cancel_session(&id)
+        manager.cancel_session(&id, sb)
     } else {
-        manager.cancel_all();
+        manager.cancel_all(sb);
         true
     }
 }
