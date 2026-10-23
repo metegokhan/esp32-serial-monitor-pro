@@ -99,6 +99,13 @@ pub fn delete_archive(filepath: &str) -> Result<(), String> {
     fs::remove_file(path).map_err(|e| format!("Dosya silme hatası: {}", e))
 }
 
+pub fn save_archive(filename: &str, content: &str) -> Result<String, String> {
+    let dir = get_archive_dir();
+    let filepath = dir.join(filename);
+    fs::write(&filepath, content).map_err(|e| format!("Arşiv yazılamadı: {}", e))?;
+    Ok(filepath.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

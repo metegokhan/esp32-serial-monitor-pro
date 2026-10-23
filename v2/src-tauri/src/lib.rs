@@ -8,7 +8,7 @@ pub mod shell;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use archive::{delete_archive, get_archive_dir, list_archives, read_archive, ArchiveEntry};
+use archive::{delete_archive, get_archive_dir, list_archives, read_archive, save_archive, ArchiveEntry};
 use serial::{SerialDeviceInfo, SerialManager};
 
 #[tauri::command]
@@ -113,6 +113,11 @@ fn delete_archive_file(filepath: String) -> Result<(), String> {
 #[tauri::command]
 fn get_archive_path() -> String {
     get_archive_dir().to_string_lossy().to_string()
+}
+
+#[tauri::command]
+fn save_ai_session_archive(filename: String, content: String) -> Result<String, String> {
+    save_archive(&filename, &content)
 }
 
 #[tauri::command]
@@ -291,6 +296,7 @@ pub fn run() {
             get_smp_cli_status_cmd,
             cancel_active_session,
             probe_port_cmd,
+            save_ai_session_archive,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

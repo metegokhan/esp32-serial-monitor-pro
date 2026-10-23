@@ -34,6 +34,41 @@ pub struct AiModelSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiTerminalLinePayload {
+    pub model_name: String,
+    pub client_id: String,
+    pub session_id: Option<String>,
+    pub port: Option<String>,
+    pub timestamp: String,
+    pub line: String,
+    pub direction: String, // "tx" | "rx" | "stage" | "info" | "error"
+    pub raw_response: Option<String>,
+}
+
+pub fn emit_ai_terminal_line(
+    app: &AppHandle,
+    model_name: &str,
+    client_id: &str,
+    session_id: Option<String>,
+    port: Option<String>,
+    direction: &str,
+    line: &str,
+    raw_response: Option<String>,
+) {
+    let payload = AiTerminalLinePayload {
+        model_name: model_name.to_string(),
+        client_id: client_id.to_string(),
+        session_id,
+        port,
+        timestamp: Local::now().format("%H:%M:%S%.3f").to_string(),
+        line: line.to_string(),
+        direction: direction.to_string(),
+        raw_response,
+    };
+    let _ = app.emit("ai-terminal-line", &payload);
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiPinInfo {
     pub id: String,
     pub session_id: String,
@@ -525,16 +560,27 @@ async fn handle_http_request(
 
                     // Check if already connected
                     let existing = state.serial_manager.get_active_sessions_info().into_iter().find(|s| s.port_name == target_port);
+                    let eff_m = req_data.model_name.clone().or(header_model.clone()).unwrap_or_else(|| "AI-Agent".to_string());
+                    let eff_c = req_data.client_id.clone().or(header_client.clone()).unwrap_or_else(|| eff_m.clone());
+
                     if let Some(sess) = existing {
-                        let eff_model = req_data.model_name.or(header_model.clone());
-                        let eff_client = req_data.client_id.or(header_client.clone());
                         record_ai_activity(
                             state,
-                            eff_model,
-                            eff_client,
+                            Some(eff_m.clone()),
+                            Some(eff_c.clone()),
                             Some(target_port.clone()),
                             Some(sess.session_id.clone()),
                             "CONNECT (EXISTING)",
+                        );
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(sess.session_id.clone()),
+                            Some(target_port.clone()),
+                            "tx",
+                            &format!("🤖 [AI -> SMP] CONNECT: port={}, baud={}", target_port, sess.baud_rate),
+                            None,
                         );
                         let resp = serde_json::json!({
                             "ok": true,
@@ -548,12 +594,33 @@ async fn handle_http_request(
                             "rts_neutral": true,
                             "message": "Cihaz zaten bağlı, mevcut oturum döndürüldü (Reset kapalı, RTS/DTR nötr)."
                         });
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(sess.session_id.clone()),
+                            Some(target_port.clone()),
+                            "info",
+                            &format!("🛡️ [SMP -> AI] Cihaz zaten bağlı, mevcut oturum hazır ({})", target_port),
+                            Some(resp.to_string()),
+                        );
                         return ("200 OK", "application/json", resp.to_string());
                     }
 
                     let s_id = req_data.session_id.unwrap_or_else(|| {
                         format!("session_ai_{}", Local::now().format("%Y%m%d_%H%M%S"))
                     });
+
+                    emit_ai_terminal_line(
+                        &state.app_handle,
+                        &eff_m,
+                        &eff_c,
+                        Some(s_id.clone()),
+                        Some(target_port.clone()),
+                        "tx",
+                        &format!("🤖 [AI -> SMP] CONNECT: port={}, baud={}, reset={}", target_port, baud, reset),
+                        None,
+                    );
 
                     match state.serial_manager.connect_session(
                         state.app_handle.clone(),
@@ -563,12 +630,10 @@ async fn handle_http_request(
                         reset,
                     ) {
                         Ok(_) => {
-                            let eff_model = req_data.model_name.or(header_model.clone());
-                            let eff_client = req_data.client_id.or(header_client.clone());
                             record_ai_activity(
                                 state,
-                                eff_model,
-                                eff_client,
+                                Some(eff_m.clone()),
+                                Some(eff_c.clone()),
                                 Some(target_port.clone()),
                                 Some(s_id.clone()),
                                 "CONNECT",
@@ -600,10 +665,30 @@ async fn handle_http_request(
                                     "🛡️ Güvenli bağlantı kuruldu (Donanımsal reset kapalı, RTS/DTR nötr)."
                                 }
                             });
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                Some(s_id.clone()),
+                                Some(target_port.clone()),
+                                "info",
+                                &format!("🛡️ [SMP -> AI] Güvenli bağlantı kuruldu ({}, {} baud)", target_port, baud),
+                                Some(resp.to_string()),
+                            );
                             ("200 OK", "application/json", resp.to_string())
                         }
                         Err(e) => {
                             let resp = serde_json::json!({ "ok": false, "error": e });
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                None,
+                                Some(target_port.clone()),
+                                "error",
+                                &format!("❌ [SMP -> AI] Bağlantı Hatası: {}", resp["error"]),
+                                Some(resp.to_string()),
+                            );
                             ("400 Bad Request", "application/json", resp.to_string())
                         }
                     }
@@ -662,6 +747,20 @@ async fn handle_http_request(
             };
 
             let baud = req_baud.unwrap_or(115200);
+            let eff_probe_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
+            let eff_probe_c = header_client.clone().unwrap_or_else(|| eff_probe_m.clone());
+
+            emit_ai_terminal_line(
+                &state.app_handle,
+                &eff_probe_m,
+                &eff_probe_c,
+                None,
+                Some(target_port.clone()),
+                "tx",
+                &format!("🔍 [AI -> SMP] PROBE: port={}", target_port),
+                None,
+            );
+
             match state.serial_manager.probe_port(&target_port, baud) {
                 Ok(probe_result) => {
                     let resp = serde_json::json!({
@@ -674,6 +773,16 @@ async fn handle_http_request(
                         "rts_neutral": true,
                         "message": "Port güvenli şekilde (reset tetiklenmeden) sorgulandı."
                     });
+                    emit_ai_terminal_line(
+                        &state.app_handle,
+                        &eff_probe_m,
+                        &eff_probe_c,
+                        None,
+                        Some(target_port.clone()),
+                        "info",
+                        &format!("🔎 [SMP -> AI] Probe Sonucu: {} ({})", probe_result.chip_family, probe_result.device_info.as_ref().map(|d| d.description.as_str()).unwrap_or(target_port.as_str())),
+                        Some(resp.to_string()),
+                    );
                     ("200 OK", "application/json", resp.to_string())
                 }
                 Err(e) => {
@@ -682,6 +791,16 @@ async fn handle_http_request(
                         "port": target_port,
                         "error": e
                     });
+                    emit_ai_terminal_line(
+                        &state.app_handle,
+                        &eff_probe_m,
+                        &eff_probe_c,
+                        None,
+                        Some(target_port.clone()),
+                        "error",
+                        &format!("❌ [SMP -> AI] Probe Hatası: {}", resp["error"]),
+                        Some(resp.to_string()),
+                    );
                     ("400 Bad Request", "application/json", resp.to_string())
                 }
             }
@@ -700,11 +819,23 @@ async fn handle_http_request(
                 .or_else(|| state.serial_manager.get_first_session_id());
 
             if let Some(id) = s_id {
+                let eff_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
+                let eff_c = header_client.clone().unwrap_or_else(|| eff_m.clone());
+                emit_ai_terminal_line(
+                    &state.app_handle,
+                    &eff_m,
+                    &eff_c,
+                    Some(id.clone()),
+                    None,
+                    "info",
+                    &format!("🔌 [AI -> SMP] Oturum bağlantısı kesildi: {}", id),
+                    None,
+                );
                 let _ = state.serial_manager.disconnect_session(&id);
                 reconcile_models(state);
                 let _ = state.app_handle.emit(
                     "ai-action",
-                    serde_json::json!({ "type": "disconnect", "sessionId": id }),
+                    serde_json::json!({ "type": "disconnect", "sessionId": id, "model_name": eff_m, "client_id": eff_c }),
                 );
                 let resp = serde_json::json!({ "ok": true, "session_id": id });
                 ("200 OK", "application/json", resp.to_string())
@@ -725,6 +856,20 @@ async fn handle_http_request(
                 .ok()
                 .and_then(|r| r.session_id)
                 .or_else(|| state.serial_manager.get_first_session_id());
+
+            let eff_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
+            let eff_c = header_client.clone().unwrap_or_else(|| eff_m.clone());
+
+            emit_ai_terminal_line(
+                &state.app_handle,
+                &eff_m,
+                &eff_c,
+                s_id.clone(),
+                None,
+                "info",
+                "🛑 [AI -> SMP] Yürütülen seri işlem iptal edildi (cancel)",
+                None,
+            );
 
             if let Some(ref id) = s_id {
                 state.serial_manager.cancel_session(id);
@@ -764,6 +909,9 @@ async fn handle_http_request(
                         .session_id
                         .or_else(|| state.serial_manager.get_first_session_id());
 
+                    let eff_m = header_model.clone().unwrap_or_else(|| "AI-Agent".to_string());
+                    let eff_c = header_client.clone().unwrap_or_else(|| eff_m.clone());
+
                     if let Some(id) = s_id {
                         let eol = req_data.eol.unwrap_or_else(|| "\r\n".to_string());
                         let delay = req_data.line_delay_ms.unwrap_or(0);
@@ -772,6 +920,16 @@ async fn handle_http_request(
                             l
                         } else if let Some(d) = req_data.data {
                             if req_data.raw == Some(true) {
+                                emit_ai_terminal_line(
+                                    &state.app_handle,
+                                    &eff_m,
+                                    &eff_c,
+                                    Some(id.clone()),
+                                    None,
+                                    "tx",
+                                    &format!("📤 [TX RAW AI -> PORT] {} bayt ham veri", d.len()),
+                                    None,
+                                );
                                 match state.serial_manager.send_data(&id, &d) {
                                     Ok(_) => {
                                         let resp = serde_json::json!({
@@ -780,10 +938,30 @@ async fn handle_http_request(
                                             "bytes_sent": d.len(),
                                             "raw": true
                                         });
+                                        emit_ai_terminal_line(
+                                            &state.app_handle,
+                                            &eff_m,
+                                            &eff_c,
+                                            Some(id.clone()),
+                                            None,
+                                            "info",
+                                            &format!("✅ [SMP -> AI] {} bayt ham veri iletildi", d.len()),
+                                            Some(resp.to_string()),
+                                        );
                                         return ("200 OK", "application/json", resp.to_string());
                                     }
                                     Err(e) => {
                                         let resp = serde_json::json!({ "ok": false, "error": e });
+                                        emit_ai_terminal_line(
+                                            &state.app_handle,
+                                            &eff_m,
+                                            &eff_c,
+                                            Some(id.clone()),
+                                            None,
+                                            "error",
+                                            &format!("❌ [SMP -> AI] Gönderim Hatası: {}", resp["error"]),
+                                            Some(resp.to_string()),
+                                        );
                                         return ("400 Bad Request", "application/json", resp.to_string());
                                     }
                                 }
@@ -798,6 +976,29 @@ async fn handle_http_request(
                             return ("400 Bad Request", "application/json", resp.to_string());
                         }
 
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(id.clone()),
+                            None,
+                            "tx",
+                            &format!("📤 [TX AI -> PORT] {} satır gönderiliyor (gecikme: {}ms)", lines_to_send.len(), delay),
+                            None,
+                        );
+                        for l in &lines_to_send {
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                Some(id.clone()),
+                                None,
+                                "tx",
+                                &format!("📤 [TX] {}", l),
+                                None,
+                            );
+                        }
+
                         match state.serial_manager.send_multiline(&id, &lines_to_send, &eol, delay) {
                             Ok(bytes) => {
                                 let resp = serde_json::json!({
@@ -807,15 +1008,45 @@ async fn handle_http_request(
                                     "bytes_sent": bytes,
                                     "line_delay_ms": delay
                                 });
+                                emit_ai_terminal_line(
+                                    &state.app_handle,
+                                    &eff_m,
+                                    &eff_c,
+                                    Some(id.clone()),
+                                    None,
+                                    "info",
+                                    &format!("✅ [SMP -> AI] 200 OK: {} bayt başarıyla iletildi", bytes),
+                                    Some(resp.to_string()),
+                                );
                                 ("200 OK", "application/json", resp.to_string())
                             }
                             Err(e) => {
                                 let resp = serde_json::json!({ "ok": false, "error": e });
+                                emit_ai_terminal_line(
+                                    &state.app_handle,
+                                    &eff_m,
+                                    &eff_c,
+                                    Some(id.clone()),
+                                    None,
+                                    "error",
+                                    &format!("❌ [SMP -> AI] Gönderim Hatası: {}", resp["error"]),
+                                    Some(resp.to_string()),
+                                );
                                 ("400 Bad Request", "application/json", resp.to_string())
                             }
                         }
                     } else {
                         let resp = serde_json::json!({ "ok": false, "error": "Bağlı aktif oturum yok" });
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            None,
+                            None,
+                            "error",
+                            "❌ [SMP -> AI] Bağlı aktif oturum yok",
+                            Some(resp.to_string()),
+                        );
                         ("400 Bad Request", "application/json", resp.to_string())
                     }
                 }
@@ -840,6 +1071,8 @@ async fn handle_http_request(
                 line_delay_ms: Option<u64>,
                 eol: Option<String>,
                 session_id: Option<String>,
+                model_name: Option<String>,
+                client_id: Option<String>,
             }
 
             match serde_json::from_str::<ExecReq>(body) {
@@ -847,6 +1080,9 @@ async fn handle_http_request(
                     let s_id = ereq
                         .session_id
                         .or_else(|| state.serial_manager.get_first_session_id());
+
+                    let eff_m = ereq.model_name.or(header_model.clone()).unwrap_or_else(|| "AI-Agent".to_string());
+                    let eff_c = ereq.client_id.or(header_client.clone()).unwrap_or_else(|| eff_m.clone());
 
                     if let Some(id) = s_id {
                         // Timeout up to 300,000 ms (5 min) for large transfers
@@ -864,7 +1100,42 @@ async fn handle_http_request(
 
                         if lines_to_send.is_empty() {
                             let resp = serde_json::json!({ "ok": false, "error": "Komut veya veri (command/data/lines) belirtilmedi" });
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                Some(id.clone()),
+                                None,
+                                "error",
+                                "❌ [SMP -> AI] Komut veya veri belirtilmedi",
+                                Some(resp.to_string()),
+                            );
                             return ("400 Bad Request", "application/json", resp.to_string());
+                        }
+
+                        let cmd_summary = lines_to_send.join(" \\n ");
+                        let exp_info = ereq.verify_expect.as_ref().or(ereq.expect.as_ref()).map(|e| format!(" --expect \"{}\"", e)).unwrap_or_default();
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(id.clone()),
+                            None,
+                            "tx",
+                            &format!("🤖 [AI -> SMP] EXEC: \"{}\"{}", if cmd_summary.len() > 80 { format!("{}...", &cmd_summary[..80]) } else { cmd_summary.clone() }, exp_info),
+                            None,
+                        );
+                        for l in &lines_to_send {
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                Some(id.clone()),
+                                None,
+                                "tx",
+                                &format!("📤 [TX -> ESP32] {}", l),
+                                None,
+                            );
                         }
 
                         // Reset any lingering cancel flag before starting execution
@@ -905,6 +1176,16 @@ async fn handle_http_request(
                                         }
                                     }
                                 });
+                                emit_ai_terminal_line(
+                                    &state.app_handle,
+                                    &eff_m,
+                                    &eff_c,
+                                    Some(id.clone()),
+                                    None,
+                                    "error",
+                                    &format!("❌ [SMP -> AI] Aktarım Hatası: {}", resp["error"]),
+                                    Some(resp.to_string()),
+                                );
                                 return ("400 Bad Request", "application/json", resp.to_string());
                             }
                         };
@@ -950,6 +1231,18 @@ async fn handle_http_request(
                             if current.len() > last_stream_count {
                                 let new_lines = current[last_stream_count..].to_vec();
                                 last_stream_count = current.len();
+                                for l in &new_lines {
+                                    emit_ai_terminal_line(
+                                        &state.app_handle,
+                                        &eff_m,
+                                        &eff_c,
+                                        Some(id.clone()),
+                                        None,
+                                        "rx",
+                                        &format!("📥 [RX <- ESP32] {}", l),
+                                        None,
+                                    );
+                                }
                                 let _ = state.app_handle.emit(
                                     "ai-exec-stream",
                                     serde_json::json!({
@@ -1062,9 +1355,61 @@ async fn handle_http_request(
                                 "verified": verified_stage
                             }
                         });
+
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(id.clone()),
+                            None,
+                            "stage",
+                            &format!("🏁 [AŞAMA 1/3: YÜKLENDİ] {} satır ({} bayt) aktarıldı ({}ms)", lines_to_send.len(), sent_bytes, upload_duration_ms),
+                            None,
+                        );
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(id.clone()),
+                            None,
+                            "stage",
+                            &format!("🏁 [AŞAMA 2/3: BAŞLATILDI] {}", if started_detected { "Cihaz yürütmeye başladı (çıktı akışı doğrulandı)" } else if was_cancelled { "İşlem iptal edildi" } else { "Çıktı bekleniyor" }),
+                            None,
+                        );
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(id.clone()),
+                            None,
+                            "stage",
+                            &format!("🏁 [AŞAMA 3/3: DOĞRULANDI] {}", if matched_expect { format!("Beklenen yanıt doğrulandı: '{}'", verify_target.unwrap_or(&"".to_string())) } else if was_cancelled { "İptal edildi".to_string() } else if verify_target.is_some() { format!("Zaman aşımı ('{}' bulunamadı)", verify_target.unwrap_or(&"".to_string())) } else { "Özel doğrulama kriteri belirtilmedi".to_string() }),
+                            None,
+                        );
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            Some(id.clone()),
+                            None,
+                            "info",
+                            &format!("✅ [SMP -> AI] 200 OK (passed: {}, süre: {}ms, satır: {})", passed, total_duration_ms, response_lines.len()),
+                            Some(resp.to_string()),
+                        );
+
                         ("200 OK", "application/json", resp.to_string())
                     } else {
                         let resp = serde_json::json!({ "ok": false, "error": "Bağlı aktif oturum yok" });
+                        emit_ai_terminal_line(
+                            &state.app_handle,
+                            &eff_m,
+                            &eff_c,
+                            None,
+                            None,
+                            "error",
+                            "❌ [SMP -> AI] Bağlı aktif oturum yok",
+                            Some(resp.to_string()),
+                        );
                         ("400 Bad Request", "application/json", resp.to_string())
                     }
                 }
@@ -1082,17 +1427,53 @@ async fn handle_http_request(
                 command: String,
                 cwd: Option<String>,
                 timeout_sec: Option<u64>,
+                model_name: Option<String>,
+                client_id: Option<String>,
             }
 
             match serde_json::from_str::<ShellReq>(body) {
                 Ok(sreq) => {
+                    let eff_m = sreq.model_name.or(header_model.clone()).unwrap_or_else(|| "AI-Agent".to_string());
+                    let eff_c = sreq.client_id.or(header_client.clone()).unwrap_or_else(|| eff_m.clone());
+
+                    emit_ai_terminal_line(
+                        &state.app_handle,
+                        &eff_m,
+                        &eff_c,
+                        None,
+                        None,
+                        "tx",
+                        &format!("💻 [AI -> KABUK] $ {}", sreq.command),
+                        None,
+                    );
+
                     match crate::shell::execute_shell(&sreq.command, sreq.cwd.as_deref(), sreq.timeout_sec) {
                         Ok(result) => {
                             let resp = serde_json::to_string(&result).unwrap_or_default();
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                None,
+                                None,
+                                "info",
+                                &format!("💻 [KABUK -> AI] Çıkış Kodu: {} ({}ms, {})", result.exit_code, result.duration_ms, result.platform),
+                                Some(resp.clone()),
+                            );
                             ("200 OK", "application/json", resp)
                         }
                         Err(e) => {
                             let resp = serde_json::json!({ "ok": false, "error": e });
+                            emit_ai_terminal_line(
+                                &state.app_handle,
+                                &eff_m,
+                                &eff_c,
+                                None,
+                                None,
+                                "error",
+                                &format!("❌ [KABUK -> AI] Hata: {}", resp["error"]),
+                                Some(resp.to_string()),
+                            );
                             ("500 Internal Server Error", "application/json", resp.to_string())
                         }
                     }

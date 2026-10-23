@@ -27,6 +27,36 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = memo(({
     );
   }
 
+  // Check for AI Terminal special lines
+  if (line.includes('[AI -> SMP]') || line.includes('[TX -> ESP32]') || line.includes('[TX AI -> PORT]')) {
+    return (
+      <span className="text-purple-300 bg-purple-950/40 font-semibold px-1 py-0.5 rounded ring-1 ring-purple-500/30">
+        {line}
+      </span>
+    );
+  }
+  if (line.includes('[AŞAMA')) {
+    return (
+      <span className="text-amber-300 bg-amber-950/60 font-bold px-1 py-0.5 rounded ring-1 ring-amber-500/40">
+        {line}
+      </span>
+    );
+  }
+  if (line.includes('[SMP -> AI]')) {
+    return (
+      <span className="text-cyan-300 bg-cyan-950/40 font-bold px-1 py-0.5 rounded ring-1 ring-cyan-500/30">
+        {line}
+      </span>
+    );
+  }
+  if (line.includes('=== AI AJAN OTURUMU') || line.includes('--- AI BAĞLANTISI KESİLDİ')) {
+    return (
+      <span className="text-indigo-300 font-bold bg-indigo-950/60 px-1 py-0.5 rounded ring-1 ring-indigo-500/40 block">
+        {line}
+      </span>
+    );
+  }
+
   // Tokenization regex: matches words, hex values, numbers, tags, or punctuation
   const tokenRegex = /(\b0x[0-9a-fA-F]+\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z0-9_]+\b|[^\sA-Za-z0-9_]+|\s+)/g;
   const tokens = line.match(tokenRegex) || [line];

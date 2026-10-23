@@ -63,6 +63,23 @@ export interface PanelSession {
   autoCloseEnabled?: boolean;
   autoCloseTimeoutSec?: number;
   pins: LogPin[];
+  isAiPanel?: boolean;
+  aiModelName?: string;
+  aiClientId?: string;
+  aiSessionStatus?: 'active' | 'passive';
+  aiActivePort?: string;
+  aiSessionArchivedAt?: string;
+}
+
+export interface AiTerminalPayload {
+  model_name: string;
+  client_id: string;
+  session_id?: string;
+  port?: string;
+  timestamp: string;
+  line: string;
+  direction: 'tx' | 'rx' | 'stage' | 'info' | 'error';
+  raw_response?: string;
 }
 
 export type TagShape = 'circle' | 'square' | 'triangle' | 'pentagon' | 'diamond';

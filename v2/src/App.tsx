@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage, FilterPreset, AutoNamingConfig, TriggerActionsConfig, AiCommandLog, LogPin, AiModelClient } from './types';
+import { PanelSession, SerialDeviceInfo, SerialDataPayload, SerialStatusPayload, I18nLanguage, FilterPreset, AutoNamingConfig, TriggerActionsConfig, AiCommandLog, LogPin, AiModelClient, AiTerminalPayload } from './types';
 import { LogPanel } from './LogPanel';
 import { ArchiveModal } from './ArchiveModal';
 import { AboutModal } from './AboutModal';
@@ -324,6 +324,72 @@ export function App() {
     }, 3200);
   }, []);
 
+  // AI Session Archiving & Lifecycle
+  const archiveAiSession = useCallback(async (p: PanelSession) => {
+    if (!p.isAiPanel || p.lines.length === 0) return null;
+    const safeModel = (p.aiModelName || 'AI_Agent').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const now = new Date();
+    const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `AI_SESSION_${safeModel}_${dateStr}.log`;
+    const header = `=== ESP32 SERIAL MONITOR PRO - AI AGENT SESSION ARCHIVE ===\nModel: ${p.aiModelName || 'AI-Agent'}\nClient ID: ${p.aiClientId || 'unknown'}\nPort: ${p.aiActivePort || p.port || 'N/A'}\nArchived At: ${now.toLocaleString()}\nTotal Lines: ${p.lines.length}\n===========================================================\n\n`;
+    const content = header + p.lines.join('\n');
+    try {
+      const savedPath = await invoke<string>('save_ai_session_archive', { filename, content });
+      showToast(
+        langRef.current === 'tr'
+          ? `💾 [${p.aiModelName || 'AI'}] AI Oturumu arşive kaydedildi: ${filename}`
+          : `💾 [${p.aiModelName || 'AI'}] AI Session archived: ${filename}`
+      );
+      return savedPath;
+    } catch (err) {
+      console.warn('Auto-save AI session error:', err);
+      return null;
+    }
+  }, [showToast]);
+
+  const handleDeactivateAiPanel = useCallback(async (panelId: string, reason?: string) => {
+    const current = panelsRef.current.find((p) => p.id === panelId);
+    if (!current || !current.isAiPanel || current.aiSessionStatus === 'passive') return;
+
+    const nowStr = new Date().toLocaleTimeString();
+    const closingMsg = `[${nowStr}] ⚠️ AI BAĞLANTISI KESİLDİ / OTURUM PASİFE ALINDI ${reason ? `(${reason})` : ''}`;
+    const archiveNote = `[${nowStr}] 💾 Oturum Otomatik Olarak AI Oturumu Olarak Arşive Kaydedildi.`;
+    const updatedLines = [
+      ...current.lines,
+      '----------------------------------------------------------------------',
+      closingMsg,
+      archiveNote,
+      '----------------------------------------------------------------------'
+    ];
+
+    setPanels((prev) =>
+      prev.map((p) => {
+        if (p.id !== panelId) return p;
+        return {
+          ...p,
+          isConnected: false,
+          aiSessionStatus: 'passive',
+          aiSessionArchivedAt: nowStr,
+          title: `🤖 ${p.aiModelName || 'AI'} [AI Bağlı Değil / Pasif]`,
+          lines: updatedLines,
+          rawLines: [...p.rawLines, closingMsg, archiveNote],
+        };
+      })
+    );
+
+    await archiveAiSession({ ...current, lines: updatedLines });
+  }, [archiveAiSession]);
+
+  const handleManualArchiveAiSession = useCallback(async (panelId: string) => {
+    const target = panelsRef.current.find((p) => p.id === panelId);
+    if (!target) return;
+    await archiveAiSession(target);
+  }, [archiveAiSession]);
+
+  const handleToggleAiPassive = useCallback(async (panelId: string) => {
+    await handleDeactivateAiPanel(panelId, 'Kullanıcı tarafından durduruldu');
+  }, [handleDeactivateAiPanel]);
+
   // Language change
   const handleToggleLang = () => {
     const next: I18nLanguage = lang === 'tr' ? 'en' : 'tr';
@@ -425,6 +491,7 @@ export function App() {
     let unlistenAiAction: (() => void) | undefined;
     let unlistenAiCommand: (() => void) | undefined;
     let unlistenAiModels: (() => void) | undefined;
+    let unlistenAiTerminal: (() => void) | undefined;
 
     const setupListeners = async () => {
       unlistenData = await listen<SerialDataPayload>('serial-data', (event) => {
@@ -563,6 +630,12 @@ export function App() {
 
         if (payload.status === 'disconnected') {
           showToast(`⚠️ ${payload.message}`);
+          const activeAiOnPort = panelsRef.current.find(
+            (p) => p.isAiPanel && p.aiSessionStatus === 'active' && (p.port === payload.port_name || p.aiActivePort === payload.port_name)
+          );
+          if (activeAiOnPort) {
+            handleDeactivateAiPanel(activeAiOnPort.id, `Port ayrıldı: ${payload.port_name}`);
+          }
           if (targetPanel && targetPanel.autoReconnect && !targetPanel.isReference && targetPanel.port) {
             setPanels((prevPanels) =>
               prevPanels.map((p) =>
@@ -700,6 +773,21 @@ export function App() {
           );
         } else if (actionType === 'disconnect') {
           const sId = payload.sessionId;
+          const clientId = payload.client_id;
+          const modelName = payload.model_name;
+
+          const matchingAiPanels = panelsRef.current.filter((p) => {
+            if (!p.isAiPanel || p.aiSessionStatus === 'passive') return false;
+            if (clientId && p.aiClientId === clientId) return true;
+            if (modelName && p.aiModelName === modelName) return true;
+            if (sId && (p.id === sId || p.port === sId || p.aiActivePort === sId)) return true;
+            return false;
+          });
+
+          matchingAiPanels.forEach((aiP) => {
+            handleDeactivateAiPanel(aiP.id, 'Oturum kapatıldı');
+          });
+
           setPanels((prev) =>
             prev.map((p) => (sId ? (p.id === sId ? { ...p, isConnected: false } : p) : { ...p, isConnected: false }))
           );
@@ -707,7 +795,85 @@ export function App() {
       });
 
       unlistenAiModels = await listen<AiModelClient[]>('ai-models-updated', (event) => {
-        setConnectedAiModels(event.payload || []);
+        const models = event.payload || [];
+        setConnectedAiModels(models);
+
+        const activeClientIds = new Set(models.filter((m) => m.active_port || m.session_id).map((m) => m.client_id));
+        const activeNames = new Set(models.filter((m) => m.active_port || m.session_id).map((m) => m.model_name));
+
+        if (models.length > 0) {
+          panelsRef.current.forEach((p) => {
+            if (p.isAiPanel && p.aiSessionStatus === 'active') {
+              const stillActive =
+                (p.aiClientId && activeClientIds.has(p.aiClientId)) ||
+                (p.aiModelName && activeNames.has(p.aiModelName));
+              if (!stillActive && (p.aiActivePort || p.port)) {
+                handleDeactivateAiPanel(p.id, 'Oturum sona erdi');
+              }
+            }
+          });
+        }
+      });
+
+      unlistenAiTerminal = await listen<AiTerminalPayload>('ai-terminal-line', (event) => {
+        const payload = event.payload;
+        const currentPanels = panelsRef.current;
+        const formattedLine = `[${payload.timestamp}] ${payload.line}`;
+
+        // Find active AI panel matching this client or model
+        let targetAiPanel = currentPanels.find(
+          (p) => p.isAiPanel && p.aiClientId === payload.client_id && p.aiSessionStatus === 'active'
+        );
+        if (!targetAiPanel && payload.model_name) {
+          targetAiPanel = currentPanels.find(
+            (p) => p.isAiPanel && p.aiModelName === payload.model_name && p.aiSessionStatus === 'active'
+          );
+        }
+
+        if (!targetAiPanel) {
+          // Brand new AI connection: spawn a new AI panel on main canvas!
+          const newPanelId = `panel_ai_${payload.client_id || 'agent'}_${Date.now()}`;
+          const initialGreeting = [
+            `======================================================================`,
+            `🤖 AI AJAN OTURUMU BAŞLATILDI: ${payload.model_name || 'AI Ajanı'}`,
+            `🆔 İstemci ID: ${payload.client_id || 'anonymous'} | Hedef Port: ${payload.port || 'Otomatik / SMP'}`,
+            `⏱️ Başlangıç Zamanı: ${new Date().toLocaleTimeString()} | SMP REST: 127.0.0.1:4567`,
+            `======================================================================`,
+            formattedLine,
+          ];
+
+          const newAiPanel: PanelSession = {
+            ...createSession(payload.port || '', false, initialGreeting, `🤖 ${payload.model_name || 'AI Ajanı'}`, defaultAutoCloseSec),
+            id: newPanelId,
+            isAiPanel: true,
+            aiModelName: payload.model_name || 'AI Ajanı',
+            aiClientId: payload.client_id || 'anonymous',
+            aiSessionStatus: 'active',
+            aiActivePort: payload.port || '',
+            isConnected: true,
+          };
+
+          setPanels((prev) => [...prev, newAiPanel]);
+          showToast(`🤖 [${newAiPanel.aiModelName}] AI Serial Monitör Paneli bağlandı!`);
+          return;
+        }
+
+        // Active AI panel exists: stream incoming line
+        setPanels((prev) =>
+          prev.map((p) => {
+            if (p.id !== targetAiPanel!.id) return p;
+            const nextLines = [...p.lines, formattedLine];
+            const nextRaw = [...p.rawLines, formattedLine];
+            const cap = maxLogCapacityRef.current;
+            return {
+              ...p,
+              lines: nextLines.length > cap ? nextLines.slice(-cap) : nextLines,
+              rawLines: nextRaw.length > cap ? nextRaw.slice(-cap) : nextRaw,
+              aiActivePort: payload.port || p.aiActivePort,
+              port: payload.port || p.port,
+            };
+          })
+        );
       });
 
       unlistenAiCommand = await listen<AiCommandLog>('ai-command-log', (event) => {
@@ -732,9 +898,10 @@ export function App() {
       if (unlistenStatus) unlistenStatus();
       if (unlistenAiAction) unlistenAiAction();
       if (unlistenAiModels) unlistenAiModels();
+      if (unlistenAiTerminal) unlistenAiTerminal();
       if (unlistenAiCommand) unlistenAiCommand();
     };
-  }, [showToast, startAutoReconnect]);
+  }, [showToast, startAutoReconnect, defaultAutoCloseSec, handleDeactivateAiPanel]);
 
   // Panel Management
   const handleAddPanel = () => {
@@ -745,7 +912,10 @@ export function App() {
 
   const handleClosePanel = async (id: string) => {
     const target = panels.find((p) => p.id === id);
-    if (target && target.isConnected) {
+    if (target && target.isAiPanel && target.aiSessionStatus === 'active') {
+      await archiveAiSession(target);
+    }
+    if (target && target.isConnected && !target.isAiPanel) {
       try {
         await invoke('disconnect_port', { sessionId: id });
       } catch (err) {
@@ -1601,6 +1771,8 @@ export function App() {
               defaultAutoCloseSec={defaultAutoCloseSec}
               onZoomIn={handleZoomIn}
               onZoomOut={handleZoomOut}
+              onArchiveAiSession={handleManualArchiveAiSession}
+              onToggleAiPassive={handleToggleAiPassive}
             />
           ))
         )}

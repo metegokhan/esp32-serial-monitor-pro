@@ -28,6 +28,7 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  Bot,
 } from 'lucide-react';
 
 interface LogPanelProps {
@@ -52,6 +53,8 @@ interface LogPanelProps {
   defaultAutoCloseSec?: number;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
+  onArchiveAiSession?: (id: string) => void;
+  onToggleAiPassive?: (id: string) => void;
 }
 
 const COMMON_BAUDS = [115200, 921600, 460800, 230400, 115200, 748800, 57600, 19200, 9600];
@@ -78,6 +81,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({
   defaultAutoCloseSec,
   onZoomIn,
   onZoomOut,
+  onArchiveAiSession,
+  onToggleAiPassive,
 }) => {
   const [commandInput, setCommandInput] = useState('');
   const [eol, setEol] = useState('\r\n');
@@ -456,6 +461,48 @@ export const LogPanel: React.FC<LogPanelProps> = ({
     } else if (e.key === 'Escape') {
       setIsEditingTitle(false);
       setTitleInput(panel.title);
+    }
+  };
+
+  // Copy AI Skill Prompt & Guide
+  const handleCopyAiPrompt = async () => {
+    try {
+      const guide = await invoke<string>('get_ai_skill_guide');
+      const prompt = `# 🤖 Serial Monitor Pro - AI Agent Skill Guide & Prompt\n\nSerial Monitor Pro yerel REST API ve CLI aracı arka planda çalışmaktadır.\n\n📡 SMP API Base URL: http://127.0.0.1:4567\n🛠️ CLI Komutu: smp <komut> veya ./smp <komut>\n\n${guide}`;
+      await navigator.clipboard.writeText(prompt);
+      onNotification(lang === 'tr' ? '🤖 AI ön promptu ve rehberi panoya kopyalandı!' : '🤖 AI guide prompt copied to clipboard!');
+    } catch {
+      const fallback = `SMP Seri Monitör API: http://127.0.0.1:4567\nsmp exec "help" --timeout 5000`;
+      await navigator.clipboard.writeText(fallback);
+      onNotification(lang === 'tr' ? '🤖 AI prompt kopyalandı.' : '🤖 AI prompt copied.');
+    }
+  };
+
+  const handleCopyAiApiUrl = async () => {
+    try {
+      await navigator.clipboard.writeText('http://127.0.0.1:4567');
+      onNotification(
+        lang === 'tr'
+          ? '🌐 SMP API Adresi kopyalandı: http://127.0.0.1:4567'
+          : '🌐 SMP API URL copied: http://127.0.0.1:4567'
+      );
+    } catch {
+      onNotification(lang === 'tr' ? '❌ Kopyalama başarısız oldu.' : '❌ Copy failed.');
+    }
+  };
+
+  // Cancel running AI command
+  const handleCancelAiCommand = async () => {
+    try {
+      await fetch('http://127.0.0.1:4567/api/cancel', { method: 'POST' });
+      onNotification(lang === 'tr' ? '🛑 AI komutu iptal edildi.' : '🛑 AI command cancelled.');
+    } catch {
+      try {
+        await invoke('cancel_active_session', { sessionId: panel.id });
+        onNotification(lang === 'tr' ? '🛑 AI oturumu iptal edildi.' : '🛑 AI session cancelled.');
+      } catch (err) {
+        console.warn('Cancel command error:', err);
+      }
     }
   };
 
@@ -961,24 +1008,53 @@ export const LogPanel: React.FC<LogPanelProps> = ({
       onMouseDown={() => {
         window.__lastActivePanelId = panel.id;
       }}
-      className="relative flex flex-col shrink-0 h-full bg-[#161824] border border-[#282b3d] rounded-lg shadow-xl overflow-hidden text-[#cdd6f4] select-none transition-shadow hover:shadow-2xl hover:border-[#3b3f5c]"
+      className={`relative flex flex-col shrink-0 h-full rounded-lg shadow-xl overflow-hidden text-[#cdd6f4] select-none transition-all hover:shadow-2xl ${
+        panel.isAiPanel
+          ? panel.aiSessionStatus === 'active'
+            ? 'bg-[#151226] border-2 border-purple-500/70 shadow-[0_0_24px_rgba(168,85,247,0.2)] hover:border-purple-400'
+            : 'bg-[#13141f] border border-slate-700/60 opacity-90'
+          : 'bg-[#161824] border border-[#282b3d] hover:border-[#3b3f5c]'
+      }`}
     >
       {/* 1. Panel Header */}
-      <div className="flex flex-col border-b border-slate-800/90 bg-[#1c1e2e] p-2.5 gap-2">
+      <div className={`flex flex-col border-b p-2.5 gap-2 ${
+        panel.isAiPanel
+          ? panel.aiSessionStatus === 'active'
+            ? 'bg-[#1c1836] border-purple-900/60'
+            : 'bg-[#181926] border-slate-800/80'
+          : 'bg-[#1c1e2e] border-slate-800/90'
+      }`}>
         {/* Row 1: Title, Badges, Port, Baud, Connect & Actions */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-            <span
-              className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
-                panel.isConnected
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : panel.isReference
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
-                  : 'bg-slate-700/40 text-slate-400 border border-slate-600/30'
-              }`}
-            >
-              {panel.isConnected ? t('liveBadge', lang) : panel.isReference ? t('refBadge', lang) : 'OTURUM'}
-            </span>
+            {panel.isAiPanel ? (
+              <span
+                className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shrink-0 flex items-center gap-1.5 ${
+                  panel.aiSessionStatus === 'active'
+                    ? 'bg-purple-600/25 text-purple-300 border border-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.3)] animate-pulse'
+                    : 'bg-slate-700/50 text-slate-400 border border-slate-600/40'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${panel.aiSessionStatus === 'active' ? 'bg-purple-400' : 'bg-slate-500'}`} />
+                <span>
+                  {panel.aiSessionStatus === 'active'
+                    ? (lang === 'tr' ? '🟢 AI BAĞLI' : '🟢 AI CONNECTED')
+                    : (lang === 'tr' ? '⚪ AI BAĞLI DEĞİL (PASİF)' : '⚪ AI DISCONNECTED (PASSIVE)')}
+                </span>
+              </span>
+            ) : (
+              <span
+                className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
+                  panel.isConnected
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : panel.isReference
+                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                    : 'bg-slate-700/40 text-slate-400 border border-slate-600/30'
+                }`}
+              >
+                {panel.isConnected ? t('liveBadge', lang) : panel.isReference ? t('refBadge', lang) : 'OTURUM'}
+              </span>
+            )}
             {panel.isReconnecting && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-pulse shrink-0">
                 <RefreshCw className="w-2.5 h-2.5 animate-spin" />
@@ -1024,6 +1100,16 @@ export const LogPanel: React.FC<LogPanelProps> = ({
               >
                 {panel.title}
               </span>
+            )}
+            {panel.isAiPanel && (
+              <button
+                type="button"
+                onClick={handleCopyAiPrompt}
+                className="p-1 text-purple-400 hover:text-purple-200 hover:bg-purple-900/50 rounded transition-all animate-pulse shrink-0 cursor-pointer"
+                title={lang === 'tr' ? '🤖 AI Rehber & Bağlantı Promptunu Kopyala' : '🤖 Copy AI Connection & Guide Prompt'}
+              >
+                <Bot className="w-4 h-4 text-purple-400" />
+              </button>
             )}
           </div>
 
@@ -1178,210 +1264,302 @@ export const LogPanel: React.FC<LogPanelProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Port Selector, Baud Selector, Connect Button, Reset Checkbox, EN/IO0 Buttons */}
-        <div className="flex items-center flex-wrap gap-2 text-xs">
-          {/* Port Dropdown */}
-          <div className="flex items-center gap-1 min-w-[140px] flex-1">
-            <select
-              value={panel.port}
-              disabled={panel.isConnected}
-              onChange={(e) => onUpdatePanel(panel.id, { port: e.target.value })}
-              style={{ backgroundColor: '#131522', color: '#cdd6f4', colorScheme: 'dark' }}
-              className="w-full bg-[#131522] border border-[#2e324a] text-[#cdd6f4] rounded-md px-2 py-1 text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50 cursor-pointer"
+        {/* Row 2: AI Toolbar OR Standard Serial Controls */}
+        {panel.isAiPanel ? (
+          <div className="flex items-center flex-wrap gap-2 text-xs py-0.5">
+            {/* AI Model Badge */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-950/70 border border-purple-500/50 text-purple-200 font-mono text-[11px] font-bold shadow-sm">
+              <Bot className="w-3.5 h-3.5 text-purple-400" />
+              <span>{panel.aiModelName || 'AI-Agent'}</span>
+              {panel.aiClientId && (
+                <span className="text-slate-400 text-[10px] font-normal">({panel.aiClientId})</span>
+              )}
+            </div>
+
+            {/* Target Port Badge */}
+            <div
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900/90 border border-slate-700/80 font-mono text-[11px] text-cyan-300"
+              title={lang === 'tr' ? 'Hedef Seri Port (Güvenli, Resetsiz)' : 'Target Serial Port (Safe, No Reset)'}
             >
-              <option value="" style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>{t('selectPort', lang)}</option>
-              {availablePorts.map((p) => (
-                <option key={p.port_name} value={p.port_name} style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>
-                  {p.display_name}
+              <span className="text-slate-400">Port:</span>
+              <span className="font-semibold">{panel.aiActivePort || panel.port || (lang === 'tr' ? 'Otomatik / Nötr' : 'Auto / Neutral')}</span>
+            </div>
+
+            {/* Clickable REST API URL */}
+            <button
+              type="button"
+              onClick={handleCopyAiApiUrl}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900/80 border border-slate-700/70 text-[11px] font-mono text-emerald-400 hover:text-emerald-300 hover:border-emerald-500/60 transition cursor-pointer"
+              title={lang === 'tr' ? 'Tıkla ve API Adresini Kopyala (http://127.0.0.1:4567)' : 'Click to copy API URL'}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>127.0.0.1:4567</span>
+            </button>
+
+            {/* Active / Passive Toggle */}
+            {panel.aiSessionStatus === 'active' ? (
+              <button
+                type="button"
+                onClick={() => onToggleAiPassive && onToggleAiPassive(panel.id)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/50 text-[11px] font-semibold transition cursor-pointer"
+                title={lang === 'tr' ? 'AI oturumunu pasife al ve otomatik arşive kaydet' : 'Set AI session to passive and archive'}
+              >
+                <span>⏸️ {lang === 'tr' ? 'Pasife Al & Kaydet' : 'Set Passive & Save'}</span>
+              </button>
+            ) : (
+              <span
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800/80 text-slate-300 border border-slate-700 text-[11px] font-mono"
+                title={panel.aiSessionArchivedAt ? `Arşivlenme: ${panel.aiSessionArchivedAt}` : undefined}
+              >
+                <span>💾 {lang === 'tr' ? 'Arşivlendi' : 'Archived'}</span>
+                {panel.aiSessionArchivedAt && (
+                  <span className="text-slate-400 text-[10px]">
+                    ({new Date(panel.aiSessionArchivedAt).toLocaleTimeString()})
+                  </span>
+                )}
+              </span>
+            )}
+
+            {/* AI Cancel / Abort Button */}
+            {panel.aiSessionStatus === 'active' && (
+              <button
+                type="button"
+                onClick={handleCancelAiCommand}
+                className="flex items-center gap-1 px-2.5 py-1 bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-700/60 rounded text-[11px] font-bold transition cursor-pointer"
+                title={lang === 'tr' ? 'Devam eden AI komutunu veya beklemesini durdur' : 'Cancel active AI command or wait'}
+              >
+                <X className="w-3.5 h-3.5 text-rose-400" />
+                <span>{lang === 'tr' ? 'İptal Et' : 'Cancel'}</span>
+              </button>
+            )}
+
+            {/* Guide Prompt Button */}
+            <button
+              type="button"
+              onClick={handleCopyAiPrompt}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/80 text-purple-200 border border-purple-500/50 rounded text-[11px] font-medium transition cursor-pointer"
+              title={lang === 'tr' ? 'AI Ajanı için bağlanma rehberi ve komut şablonunu kopyala' : 'Copy AI connection prompt & command guide'}
+            >
+              <Bot className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+              <span>{lang === 'tr' ? 'Rehber Prompt' : 'Guide Prompt'}</span>
+            </button>
+
+            {/* Manual Archive Button */}
+            <button
+              type="button"
+              onClick={() => onArchiveAiSession && onArchiveAiSession(panel.id)}
+              className="flex items-center gap-1 px-2.5 py-1 bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-600/50 rounded text-[11px] font-medium transition cursor-pointer"
+              title={lang === 'tr' ? 'Bu AI oturumunu arşive kaydet' : 'Archive this AI session'}
+            >
+              <Download className="w-3 h-3 text-indigo-400" />
+              <span>{lang === 'tr' ? 'Arşivle' : 'Archive'}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center flex-wrap gap-2 text-xs">
+            {/* Port Dropdown */}
+            <div className="flex items-center gap-1 min-w-[140px] flex-1">
+              <select
+                value={panel.port}
+                disabled={panel.isConnected}
+                onChange={(e) => onUpdatePanel(panel.id, { port: e.target.value })}
+                style={{ backgroundColor: '#131522', color: '#cdd6f4', colorScheme: 'dark' }}
+                className="w-full bg-[#131522] border border-[#2e324a] text-[#cdd6f4] rounded-md px-2 py-1 text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50 cursor-pointer"
+              >
+                <option value="" style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>{t('selectPort', lang)}</option>
+                {availablePorts.map((p) => (
+                  <option key={p.port_name} value={p.port_name} style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>
+                    {p.display_name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={onRefreshPorts}
+                className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded cursor-pointer"
+                title="Portları Yenile"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Baud Rate */}
+            <select
+              value={panel.baudRate}
+              disabled={panel.isConnected}
+              onChange={(e) => onUpdatePanel(panel.id, { baudRate: Number(e.target.value) })}
+              style={{ backgroundColor: '#131522', color: '#cdd6f4', colorScheme: 'dark' }}
+              className="w-24 bg-[#131522] border border-[#2e324a] text-[#cdd6f4] rounded-md px-2 py-1 text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50 font-mono cursor-pointer"
+            >
+              {COMMON_BAUDS.map((b) => (
+                <option key={b} value={b} style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>
+                  {b}
                 </option>
               ))}
             </select>
+
+            {/* Connect / Disconnect Button */}
             <button
-              onClick={onRefreshPorts}
-              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded cursor-pointer"
-              title="Portları Yenile"
+              onClick={handleToggleConnect}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded font-bold transition-all shadow-sm ${
+                panel.isConnected
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+              }`}
             >
-              <RefreshCw className="w-3 h-3" />
+              {panel.isConnected ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
+              {panel.isConnected ? t('disconnect', lang) : t('connect', lang)}
             </button>
-          </div>
 
-          {/* Baud Rate */}
-          <select
-            value={panel.baudRate}
-            disabled={panel.isConnected}
-            onChange={(e) => onUpdatePanel(panel.id, { baudRate: Number(e.target.value) })}
-            style={{ backgroundColor: '#131522', color: '#cdd6f4', colorScheme: 'dark' }}
-            className="w-24 bg-[#131522] border border-[#2e324a] text-[#cdd6f4] rounded-md px-2 py-1 text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50 font-mono cursor-pointer"
-          >
-            {COMMON_BAUDS.map((b) => (
-              <option key={b} value={b} style={{ backgroundColor: '#131522', color: '#cdd6f4' }}>
-                {b}
-              </option>
-            ))}
-          </select>
-
-          {/* Connect / Disconnect Button */}
-          <button
-            onClick={handleToggleConnect}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded font-bold transition-all shadow-sm ${
-              panel.isConnected
-                ? 'bg-rose-600 hover:bg-rose-500 text-white'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-            }`}
-          >
-            {panel.isConnected ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
-            {panel.isConnected ? t('disconnect', lang) : t('connect', lang)}
-          </button>
-
-          {/* Safe Connect Mode Badge / Toggle */}
-          <button
-            type="button"
-            onClick={() => onUpdatePanel(panel.id, { resetOnConnect: !panel.resetOnConnect })}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono font-medium transition cursor-pointer select-none shadow-sm ${
-              panel.resetOnConnect
-                ? 'bg-amber-950/80 border border-amber-500/60 text-amber-300 hover:bg-amber-900/90'
-                : 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/90'
-            }`}
-            title={
-              panel.resetOnConnect
-                ? (lang === 'tr'
-                    ? '⚠️ Resetli Bağlantı Açık: Bağlanırken EN darbesi ile kart sıfırlanır. Tıklayarak güvenli (resetsiz) moda dönebilirsiniz.'
-                    : '⚠️ Reset on Connect Active: EN pulse will reset chip on open. Click to switch to Safe Connect.')
-                : (lang === 'tr'
-                    ? '🛡️ Güvenli Bağlantı (Reset Kapalı): RTS ve DTR sinyalleri nötr tutulur, karta donanımsal reset ASLA verilmez. Tıklayarak resetli moda geçebilirsiniz.'
-                    : '🛡️ Safe Connect (Reset Disabled): Neutral RTS/DTR lines guaranteed, zero reset. Click to toggle reset.')
-            }
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${panel.resetOnConnect ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
-            <span>
-              {panel.resetOnConnect
-                ? (lang === 'tr' ? '⚠️ Resetli Bağlantı' : '⚠️ Reset Active')
-                : (lang === 'tr' ? '🛡️ Güvenli Bağlantı (Reset Kapalı)' : '🛡️ Safe Connect (No Reset)')}
-            </span>
-          </button>
-
-          {/* Connected Signals Indicator (DTR / RTS) */}
-          {panel.isConnected && (
-            <div
-              className="flex items-center gap-1 text-[10px] font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 shrink-0"
-              title={lang === 'tr' ? 'UART Donanım Kontrol Hatları (Nötr / Reset Yok)' : 'UART Control Lines (Neutral / Zero Reset)'}
+            {/* Safe Connect Mode Badge / Toggle */}
+            <button
+              type="button"
+              onClick={() => onUpdatePanel(panel.id, { resetOnConnect: !panel.resetOnConnect })}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono font-medium transition cursor-pointer select-none shadow-sm ${
+                panel.resetOnConnect
+                  ? 'bg-amber-950/80 border border-amber-500/60 text-amber-300 hover:bg-amber-900/90'
+                  : 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/90'
+              }`}
+              title={
+                panel.resetOnConnect
+                  ? (lang === 'tr'
+                      ? '⚠️ Resetli Bağlantı Açık: Bağlanırken EN darbesi ile kart sıfırlanır. Tıklayarak güvenli (resetsiz) moda dönebilirsiniz.'
+                      : '⚠️ Reset on Connect Active: EN pulse will reset chip on open. Click to switch to Safe Connect.')
+                  : (lang === 'tr'
+                      ? '🛡️ Güvenli Bağlantı (Reset Kapalı): RTS ve DTR sinyalleri nötr tutulur, karta donanımsal reset ASLA verilmez. Tıklayarak resetli moda geçebilirsiniz.'
+                      : '🛡️ Safe Connect (Reset Disabled): Neutral RTS/DTR lines guaranteed, zero reset. Click to toggle reset.')
+              }
             >
-              <span className="text-emerald-400 font-bold">DTR: 0</span>
-              <span className="text-slate-600">|</span>
-              <span className="text-emerald-400 font-bold">RTS: 0</span>
-            </div>
-          )}
+              <span className={`w-1.5 h-1.5 rounded-full ${panel.resetOnConnect ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+              <span>
+                {panel.resetOnConnect
+                  ? (lang === 'tr' ? '⚠️ Resetli Bağlantı' : '⚠️ Reset Active')
+                  : (lang === 'tr' ? '🛡️ Güvenli Bağlantı (Reset Kapalı)' : '🛡️ Safe Connect (No Reset)')}
+              </span>
+            </button>
 
-          {/* Auto Reconnect */}
-          <label
-            className="flex items-center gap-1 cursor-pointer select-none text-[11px] text-slate-300 hover:text-cyan-300 transition-colors"
-            title={t('autoReconnectTip', lang)}
-          >
-            <input
-              type="checkbox"
-              checked={panel.autoReconnect}
-              onChange={(e) => onUpdatePanel(panel.id, { autoReconnect: e.target.checked })}
-              className="rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
-            />
-            <span>{t('autoReconnect', lang)}</span>
-          </label>
+            {/* Connected Signals Indicator (DTR / RTS) */}
+            {panel.isConnected && (
+              <div
+                className="flex items-center gap-1 text-[10px] font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 shrink-0"
+                title={lang === 'tr' ? 'UART Donanım Kontrol Hatları (Nötr / Reset Yok)' : 'UART Control Lines (Neutral / Zero Reset)'}
+              >
+                <span className="text-emerald-400 font-bold">DTR: 0</span>
+                <span className="text-slate-600">|</span>
+                <span className="text-emerald-400 font-bold">RTS: 0</span>
+              </div>
+            )}
 
-          {/* Auto Close Timeout */}
-          <div
-            className="flex items-center gap-1.5 bg-[#121422] border border-[#2e324a] px-2 py-0.5 rounded text-[11px] select-none hover:border-amber-500/50 transition-colors shrink-0"
-            title={t('autoCloseTip', lang)}
-          >
-            <label className="flex items-center gap-1 cursor-pointer select-none">
+            {/* Auto Reconnect */}
+            <label
+              className="flex items-center gap-1 cursor-pointer select-none text-[11px] text-slate-300 hover:text-cyan-300 transition-colors"
+              title={t('autoReconnectTip', lang)}
+            >
               <input
                 type="checkbox"
-                checked={!!panel.autoCloseEnabled}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  const fallback = defaultAutoCloseSec || 30;
-                  onUpdatePanel(panel.id, {
-                    autoCloseEnabled: checked,
-                    autoCloseTimeoutSec: checked
-                      ? (panel.autoCloseTimeoutSec && panel.autoCloseTimeoutSec > 0 ? panel.autoCloseTimeoutSec : fallback)
-                      : panel.autoCloseTimeoutSec,
-                  });
-                }}
-                className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                checked={panel.autoReconnect}
+                onChange={(e) => onUpdatePanel(panel.id, { autoReconnect: e.target.checked })}
+                className="rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
               />
-              <span className={panel.autoCloseEnabled ? 'text-amber-300 font-semibold' : 'text-slate-300'}>
-                {t('autoClose', lang)}
-              </span>
+              <span>{t('autoReconnect', lang)}</span>
             </label>
 
-            <input
-              type="number"
-              min="1"
-              max="86400"
-              placeholder={String(defaultAutoCloseSec || 30)}
-              value={panel.autoCloseTimeoutSec ?? ''}
-              onChange={(e) => {
-                const val = e.target.value.trim();
-                if (val === '') {
-                  onUpdatePanel(panel.id, {
-                    autoCloseTimeoutSec: undefined,
-                    autoCloseEnabled: false,
-                  });
-                } else {
-                  const num = parseInt(val, 10);
-                  if (!isNaN(num) && num > 0) {
-                    onUpdatePanel(panel.id, {
-                      autoCloseTimeoutSec: num,
-                      autoCloseEnabled: true,
-                    });
-                  }
-                }
-              }}
-              className="w-11 bg-[#0a0b12] border border-[#2a2d42] focus:border-amber-500 text-amber-300 text-[11px] rounded px-1 py-0 text-center font-mono outline-none"
-              title={lang === 'tr' ? 'Saniye olarak süre girin (boş bırakılırsa hep açık kalır)' : 'Enter seconds (leave blank to stay open indefinitely)'}
-            />
-            <span className="text-[10px] text-slate-400 font-mono">{t('autoCloseSeconds', lang)}</span>
-          </div>
-
-          {/* Abort / Cancel Transfer Button */}
-          {panel.isConnected && (
-            <button
-              onClick={async () => {
-                try {
-                  await invoke('cancel_active_session', { sessionId: panel.id });
-                  onNotification(lang === 'tr' ? '⚠️ Devam eden aktarım durduruldu (İptal).' : '⚠️ Ongoing transfer cancelled.');
-                } catch (e) {
-                  console.error(e);
-                }
-              }}
-              className="flex items-center gap-1 px-2 py-1 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded text-[11px] font-mono transition cursor-pointer"
-              title={lang === 'tr' ? 'Devam eden çok satırlı gönderimi veya işlemi iptal et' : 'Abort ongoing send or exec operation'}
+            {/* Auto Close Timeout */}
+            <div
+              className="flex items-center gap-1.5 bg-[#121422] border border-[#2e324a] px-2 py-0.5 rounded text-[11px] select-none hover:border-amber-500/50 transition-colors shrink-0"
+              title={t('autoCloseTip', lang)}
             >
-              <X className="w-3 h-3 text-rose-400" />
-              <span>{lang === 'tr' ? 'İptal' : 'Abort'}</span>
+              <label className="flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={!!panel.autoCloseEnabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    const fallback = defaultAutoCloseSec || 30;
+                    onUpdatePanel(panel.id, {
+                      autoCloseEnabled: checked,
+                      autoCloseTimeoutSec: checked
+                        ? (panel.autoCloseTimeoutSec && panel.autoCloseTimeoutSec > 0 ? panel.autoCloseTimeoutSec : fallback)
+                        : panel.autoCloseTimeoutSec,
+                    });
+                  }}
+                  className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                />
+                <span className={panel.autoCloseEnabled ? 'text-amber-300 font-semibold' : 'text-slate-300'}>
+                  {t('autoClose', lang)}
+                </span>
+              </label>
+
+              <input
+                type="number"
+                min="1"
+                max="86400"
+                placeholder={String(defaultAutoCloseSec || 30)}
+                value={panel.autoCloseTimeoutSec ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value.trim();
+                  if (val === '') {
+                    onUpdatePanel(panel.id, {
+                      autoCloseTimeoutSec: undefined,
+                      autoCloseEnabled: false,
+                    });
+                  } else {
+                    const num = parseInt(val, 10);
+                    if (!isNaN(num) && num > 0) {
+                      onUpdatePanel(panel.id, {
+                        autoCloseTimeoutSec: num,
+                        autoCloseEnabled: true,
+                      });
+                    }
+                  }
+                }}
+                className="w-11 bg-[#0a0b12] border border-[#2a2d42] focus:border-amber-500 text-amber-300 text-[11px] rounded px-1 py-0 text-center font-mono outline-none"
+                title={lang === 'tr' ? 'Saniye olarak süre girin (boş bırakılırsa hep açık kalır)' : 'Enter seconds (leave blank to stay open indefinitely)'}
+              />
+              <span className="text-[10px] text-slate-400 font-mono">{t('autoCloseSeconds', lang)}</span>
+            </div>
+
+            {/* Abort / Cancel Transfer Button */}
+            {panel.isConnected && (
+              <button
+                onClick={async () => {
+                  try {
+                    await invoke('cancel_active_session', { sessionId: panel.id });
+                    onNotification(lang === 'tr' ? '⚠️ Devam eden aktarım durduruldu (İptal).' : '⚠️ Ongoing transfer cancelled.');
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                className="flex items-center gap-1 px-2 py-1 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded text-[11px] font-mono transition cursor-pointer"
+                title={lang === 'tr' ? 'Devam eden çok satırlı gönderimi veya işlemi iptal et' : 'Abort ongoing send or exec operation'}
+              >
+                <X className="w-3 h-3 text-rose-400" />
+                <span>{lang === 'tr' ? 'İptal' : 'Abort'}</span>
+              </button>
+            )}
+
+            {/* Hardware Reset (EN) */}
+            <button
+              onClick={handleHardwareReset}
+              disabled={!panel.isConnected}
+              className="flex items-center gap-1 px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700/50 rounded disabled:opacity-40 transition-colors font-mono font-medium text-[11px]"
+              title={t('hwResetTip', lang)}
+            >
+              <RotateCcw className="w-3 h-3 text-amber-400" />
+              <span>⚡ EN Reset</span>
             </button>
-          )}
 
-          {/* Hardware Reset (EN) */}
-          <button
-            onClick={handleHardwareReset}
-            disabled={!panel.isConnected}
-            className="flex items-center gap-1 px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700/50 rounded disabled:opacity-40 transition-colors font-mono font-medium text-[11px]"
-            title={t('hwResetTip', lang)}
-          >
-            <RotateCcw className="w-3 h-3 text-amber-400" />
-            <span>⚡ EN Reset</span>
-          </button>
-
-          {/* Bootloader Mode (IO0) */}
-          <button
-            onClick={handleBootloader}
-            disabled={!panel.isConnected}
-            className="flex items-center gap-1 px-2.5 py-1 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-700/50 rounded disabled:opacity-40 transition-colors font-mono font-medium text-[11px]"
-            title={t('bootloaderTip', lang)}
-          >
-            <Sparkles className="w-3 h-3 text-purple-400" />
-            <span>IO0 Boot</span>
-          </button>
-        </div>
+            {/* Bootloader Mode (IO0) */}
+            <button
+              onClick={handleBootloader}
+              disabled={!panel.isConnected}
+              className="flex items-center gap-1 px-2.5 py-1 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-700/50 rounded disabled:opacity-40 transition-colors font-mono font-medium text-[11px]"
+              title={t('bootloaderTip', lang)}
+            >
+              <Sparkles className="w-3 h-3 text-purple-400" />
+              <span>IO0 Boot</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2. Range Selection Banner (Nokta A - Nokta B seçildiğinde açılır) */}
