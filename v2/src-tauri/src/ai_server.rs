@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::Local;
+use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -152,13 +153,18 @@ Sends single-line or multiline UART data to the connected device.
   - `{"data": "print(1)\nprint(2)", "line_delay_ms": 30, "eol": "\r\n"}` (multiline string)
   - `{"data": "\x01\x02", "raw": true}` (raw bytes)
 
-### 9. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
+### 9. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <pattern>] [--start <pattern>] [--delay ms]`)
 **⚡ Interactive Serial Execution with Granular Stage Breakdown**:
 Sends command(s), streams live output lines to terminal, and returns 3 distinct stages:
 - **`stages.uploaded`**: Technical transmission & CRC/byte transfer
 - **`stages.started`**: Execution start & initial response detection
 - **`stages.verified`**: Assertion verification (does not falsify technical `ok` if unverified)
 - Supports up to 300,000ms timeout for large transfers.
+- **Pattern Matching (`--expect`, `--start`)**: Supports regex (e.g. `STREAM complete|playback_started`) and case-insensitive matching.
+- **ESP32 Audio / TinyMusic Signatures**:
+  - Playback start: `playback_started` or `TINYMUSIC_STREAM playback_started`
+  - Playback finish: `TINYMUSIC_STREAM complete` or `TINYMUSIC_TRACK result=0`
+  - Streaming progress: `TINYMUSIC_STREAM progress`
 - JSON body: `{"command": "help", "timeout_ms": 5000, "expect": ">>>", "line_delay_ms": 30}`
 
 ### 10. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
@@ -239,8 +245,9 @@ pub fn start_ai_http_server(
     std::thread::Builder::new()
         .name("ai-http-server".to_string())
         .spawn(move || {
+            let worker_count = std::cmp::max(4, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
             let rt = match tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
+                .worker_threads(worker_count)
                 .enable_all()
                 .build()
             {
@@ -273,15 +280,68 @@ pub fn start_ai_http_server(
                 loop {
                     match listener.accept().await {
                         Ok((mut stream, _addr)) => {
+                            let _ = stream.set_nodelay(true);
                             let st = state.clone();
                             tokio::spawn(async move {
-                                let mut buffer = [0u8; 16384];
-                                let bytes_read = match stream.read(&mut buffer).await {
-                                    Ok(n) if n > 0 => n,
-                                    _ => return,
-                                };
+                                let mut raw_data = Vec::with_capacity(4096);
+                                let mut chunk = [0u8; 8192];
+                                let mut content_length: Option<usize> = None;
+                                let mut header_end_idx: Option<usize> = None;
 
-                                let raw_req = String::from_utf8_lossy(&buffer[..bytes_read]);
+                                loop {
+                                    let n = match stream.read(&mut chunk).await {
+                                        Ok(0) => break,
+                                        Ok(n) => n,
+                                        Err(_) => break,
+                                    };
+                                    raw_data.extend_from_slice(&chunk[..n]);
+
+                                    if header_end_idx.is_none() {
+                                        if let Some(pos) = raw_data.windows(4).position(|w| w == b"\r\n\r\n") {
+                                            header_end_idx = Some(pos + 4);
+                                            let headers = String::from_utf8_lossy(&raw_data[..pos]);
+                                            for l in headers.lines() {
+                                                if let Some((k, v)) = l.split_once(':') {
+                                                    if k.trim().eq_ignore_ascii_case("content-length") {
+                                                        if let Ok(cl) = v.trim().parse::<usize>() {
+                                                            content_length = Some(cl);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if let Some(pos) = raw_data.windows(2).position(|w| w == b"\n\n") {
+                                            header_end_idx = Some(pos + 2);
+                                            let headers = String::from_utf8_lossy(&raw_data[..pos]);
+                                            for l in headers.lines() {
+                                                if let Some((k, v)) = l.split_once(':') {
+                                                    if k.trim().eq_ignore_ascii_case("content-length") {
+                                                        if let Ok(cl) = v.trim().parse::<usize>() {
+                                                            content_length = Some(cl);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if let (Some(h_end), Some(cl)) = (header_end_idx, content_length) {
+                                        if raw_data.len() >= h_end + cl {
+                                            break;
+                                        }
+                                    } else if header_end_idx.is_some() && content_length.is_none() {
+                                        break;
+                                    }
+
+                                    if raw_data.len() > 10 * 1024 * 1024 {
+                                        break;
+                                    }
+                                }
+
+                                if raw_data.is_empty() {
+                                    return;
+                                }
+
+                                let raw_req = String::from_utf8_lossy(&raw_data);
                                 let (res_status, res_type, res_body) = handle_http_request(&st, &raw_req).await;
 
                                 let http_resp = format!(
@@ -1197,12 +1257,29 @@ async fn handle_http_request(
                         let mut started_at_ms: Option<u64> = None;
                         let mut matched_expect = false;
                         let mut verified_at_ms: Option<u64> = None;
-                        let mut response_lines = Vec::new();
+                        let mut accumulated_lines: Vec<String> = Vec::new();
                         let mut was_cancelled = false;
 
                         let verify_target = ereq.verify_expect.as_ref().or(ereq.expect.as_ref());
                         let start_target = ereq.start_expect.as_ref();
-                        let mut last_stream_count = 0;
+
+                        let verify_re = verify_target.and_then(|exp| {
+                            RegexBuilder::new(exp).case_insensitive(true).build().ok()
+                        });
+                        let start_re = start_target.and_then(|st| {
+                            RegexBuilder::new(st).case_insensitive(true).build().ok()
+                        });
+
+                        let matches_target = |line: &str, target_str: &str, re_opt: &Option<regex::Regex>| -> bool {
+                            if let Some(re) = re_opt {
+                                if re.is_match(line) {
+                                    return true;
+                                }
+                            }
+                            line.to_lowercase().contains(&target_str.to_lowercase())
+                        };
+
+                        let mut last_count = start_count;
 
                         while exec_start_time.elapsed() < timeout {
                             // Support cancellation mid-wait
@@ -1211,27 +1288,37 @@ async fn handle_http_request(
                                 break;
                             }
 
-                            std::thread::sleep(Duration::from_millis(25));
-                            let current = state.serial_manager.get_lines_since(&id, start_count);
+                            tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
 
-                            // Detect Started stage
-                            if !started_detected && !current.is_empty() {
-                                if let Some(ref st_exp) = start_target {
-                                    if current.iter().any(|l| l.contains(st_exp.as_str())) {
-                                        started_detected = true;
-                                        started_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
-                                    }
-                                } else {
-                                    started_detected = true;
-                                    started_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
-                                }
-                            }
+                            let current_total = state.serial_manager.get_total_lines_count(&id).unwrap_or(last_count);
+                            if current_total > last_count {
+                                let new_lines = state.serial_manager.get_lines_since(&id, last_count);
+                                last_count = current_total;
 
-                            // Stream live lines to UI
-                            if current.len() > last_stream_count {
-                                let new_lines = current[last_stream_count..].to_vec();
-                                last_stream_count = current.len();
                                 for l in &new_lines {
+                                    // Detect Started stage
+                                    if !started_detected {
+                                        if let Some(ref st_exp) = start_target {
+                                            if matches_target(l, st_exp.as_str(), &start_re) {
+                                                started_detected = true;
+                                                started_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                            }
+                                        } else {
+                                            started_detected = true;
+                                            started_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                        }
+                                    }
+
+                                    // Detect Verification stage
+                                    if let Some(ref exp) = verify_target {
+                                        if matches_target(l, exp.as_str(), &verify_re) {
+                                            matched_expect = true;
+                                            if verified_at_ms.is_none() {
+                                                verified_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
+                                            }
+                                        }
+                                    }
+
                                     emit_ai_terminal_line(
                                         &state.app_handle,
                                         &eff_m,
@@ -1243,28 +1330,27 @@ async fn handle_http_request(
                                         None,
                                     );
                                 }
+
+                                let total_now = accumulated_lines.len() + new_lines.len();
                                 let _ = state.app_handle.emit(
                                     "ai-exec-stream",
                                     serde_json::json!({
                                         "sessionId": id,
                                         "newLines": new_lines,
-                                        "totalLines": current.len(),
+                                        "totalLines": total_now,
                                         "elapsedMs": exec_start_time.elapsed().as_millis() as u64
                                     }),
                                 );
-                            }
 
-                            // Detect Verification stage
-                            if let Some(exp) = verify_target {
-                                if current.iter().any(|l| l.contains(exp.as_str())) {
-                                    matched_expect = true;
-                                    verified_at_ms = Some(exec_start_time.elapsed().as_millis() as u64);
-                                    response_lines = current;
+                                accumulated_lines.extend(new_lines);
+
+                                if matched_expect {
                                     break;
                                 }
                             }
-                            response_lines = current;
                         }
+
+                        let response_lines = accumulated_lines;
 
                         let exec_duration_ms = exec_start_time.elapsed().as_millis() as u64;
                         let total_duration_ms = upload_duration_ms + exec_duration_ms;

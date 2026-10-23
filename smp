@@ -71,9 +71,11 @@ Sends single-line or multiline UART data to the connected device.
 - JSON body: `{"data": "...", "line_delay_ms": 30, "raw": false}`
 - Can send files (`-f script.py`) or read from stdin (`cat code.py | ./smp send -`).
 
-### 7. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
-**⚡ Interactive Serial Execution**: Sends command, waits for device response lines, and prints them immediately!
-- JSON body: `{"command": "help", "timeout_ms": 2500, "expect": ">>>", "line_delay_ms": 30}`
+### 7. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <pattern>] [--start <pattern>] [--delay ms]`)
+**⚡ Interactive Serial Execution**: Sends command, streams device response lines, and evaluates 3 distinct stages (uploaded, started, verified).
+- **Pattern Matching**: `--expect` and `--start` support regex (`STREAM complete|playback_started`) and case-insensitive matching.
+- **ESP32 Audio Signatures**: Start: `playback_started`, Complete: `TINYMUSIC_STREAM complete` or `TINYMUSIC_TRACK result=0`.
+- JSON body: `{"command": "help", "timeout_ms": 5000, "expect": ">>>", "line_delay_ms": 30}`
 
 ### 8. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
 **💻 Cross-Platform Local Shell Execution**: Runs local shell command (Windows PowerShell / Linux bash/sh).
