@@ -574,19 +574,6 @@ impl SerialManager {
         let ports = self.scan_ports("");
         let dev_info = ports.into_iter().find(|p| p.port_name == port_name);
 
-        let port_builder = serialport::new(port_name, baud_rate)
-            .timeout(Duration::from_millis(250));
-
-        let mut port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
-        // Guarantee neutral lines during probe - absolutely NO reset
-        let _ = port.write_data_terminal_ready(false);
-        let _ = port.write_request_to_send(false);
-
-        let _ = port.write_all(b"\r\n");
-        let mut buffer = [0u8; 512];
-        let bytes_read = port.read(&mut buffer).unwrap_or(0);
-        let response = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
-
         let mut chip_family = "Generic UART".to_string();
         if let Some(ref d) = dev_info {
             if let Some(vid) = d.vid {
@@ -607,6 +594,35 @@ impl SerialManager {
                 }
             }
         }
+
+        // If port is already open in an active session, probe gracefully without 'Device busy' error
+        {
+            let map = self.sessions.lock().unwrap();
+            if let Some(session) = map.values().find(|s| s.port_name == port_name) {
+                let sample = session.recent_lines.lock().unwrap().back().cloned().unwrap_or_default();
+                return Ok(PortProbeResult {
+                    port_name: port_name.to_string(),
+                    baud_rate: session.baud_rate,
+                    responsive: true,
+                    response_sample: sample,
+                    chip_family,
+                    device_info: dev_info,
+                });
+            }
+        }
+
+        let port_builder = serialport::new(port_name, baud_rate)
+            .timeout(Duration::from_millis(250));
+
+        let mut port = port_builder.open().map_err(|e| format!("Port açılamadı {}: {}", port_name, e))?;
+        // Guarantee neutral lines during probe - absolutely NO reset
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        let _ = port.write_all(b"\r\n");
+        let mut buffer = [0u8; 512];
+        let bytes_read = port.read(&mut buffer).unwrap_or(0);
+        let response = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
 
         Ok(PortProbeResult {
             port_name: port_name.to_string(),

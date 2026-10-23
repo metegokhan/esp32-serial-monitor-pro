@@ -40,105 +40,91 @@ Serial Monitor Pro provides an autonomous Headless REST API and CLI tool (`smp` 
 ### 1. `GET /api/status` (or `./smp status`)
 Returns the complete state of the serial monitor:
 - Active panels & open ports
+- Connected AI models & their operating ports
 - Baud rates & connection statuses
 - RX / TX byte counts & line counts
 - Active filters, triggers, and pins count
 
 ### 2. `GET /api/ports` (or `./smp ports`)
-Scans host USB/UART ports. Identifies ESP32, Arduino, CH340, CP2102, FTDI chips with VID/PID, serial number, and product name.
+Scans host USB/UART ports. Identifies ESP32, Arduino, CH340, CP2102, FTDI chips with VID/PID and category.
 
-### 3. `POST /api/connect` (or `./smp connect [port|"auto"] [baud] [--reset] [--match <hint>]`)
-Connects to a serial port safely.
-- JSON body: `{"port": "auto"|"/dev/ttyUSB0", "baud": 115200, "reset": false, "match": "ESP32"}`
-- **🛡️ Safe Connect Default**: Neutral RTS/DTR lines guaranteed, zero reset.
-- If `port` is omitted or `"auto"`, automatically detects and connects to the plugged ESP32/UART device!
-- `--match <hint>` disambiguates when multiple devices are plugged in (matches chip name, VID/PID, serial number).
-- If already connected, gracefully returns the existing active session without reset.
+### 3. `POST /api/connect` (or `./smp connect <port> [baud] [--reset]`)
+Connects to a serial port.
+### 3. `POST /api/connect` (or `./smp connect [port|"auto"] [baud] [--reset]`)
+Connects to a serial port.
+- JSON body: `{"port": "auto"|"/dev/ttyUSB0", "baud": 115200, "reset": false}`
+- When omitted or "auto", automatically finds and connects to the connected ESP32/UART device!
+- If already connected, gracefully returns the existing session.
 
-### 4. `POST /api/probe` (or `./smp probe [port] [baud]`)
-Non-destructive chip and protocol probe without triggering an EN/IO0 hardware reset!
-- Returns chip family, USB identifiers, and initial response sample.
-
-### 5. `POST /api/disconnect` (or `./smp disconnect [session_id]`)
-Disconnects the port cleanly and cleans up AI session mappings.
+### 4. `POST /api/disconnect` (or `./smp disconnect [session_id]`)
+Disconnects the port cleanly.
 - JSON body: `{"session_id": "session_xxx"}` (or empty for default session).
 
-### 6. `POST /api/cancel` (or `./smp cancel [session_id]`)
-Aborts any active long-running serial upload or execution wait immediately (also bound to Ctrl+C in CLI).
-
-### 7. `GET /api/logs` (or `./smp logs [--tail N] [--filter <term>]`)
+### 5. `GET /api/logs` (or `./smp logs [--tail N] [--filter <term>]`)
 Fetches the latest N log lines from the device.
 - Query params: `tail=50`, `filter=HEAP`, `session_id=...`
 - Context window filtering: `--filter "tag+5"` shows tagged lines plus 5 context lines before and after!
 - Returns: `{"lines": ["line 1", "line 2", ...], "count": 50}`
 
-### 8. `POST /api/send` (or `./smp send <command> [--delay ms] [--raw] [-f file]`)
+### 6. `POST /api/send` (or `./smp send <command> [--delay ms] [--raw] [-f file]`)
 Sends single-line or multiline UART data to the connected device.
 - JSON body: `{"data": "...", "line_delay_ms": 30, "raw": false}`
 - Can send files (`-f script.py`) or read from stdin (`cat code.py | ./smp send -`).
 
-### 9. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
-**⚡ Interactive Serial Execution with Granular Stage Breakdown**:
-Sends command(s), streams live output lines to terminal, and returns 3 distinct stages:
-- **`stages.uploaded`**: Technical transmission & CRC/byte transfer
-- **`stages.started`**: Execution start & initial response detection
-- **`stages.verified`**: Assertion verification (does not falsify technical `ok` if unverified)
-- Supports up to 300,000ms timeout for large transfers.
-- JSON body: `{"command": "help", "timeout_ms": 5000, "expect": ">>>", "line_delay_ms": 30}`
+### 7. `POST /api/exec` (or `./smp exec <command> [--timeout ms] [--expect <text>] [--delay ms]`)
+**⚡ Interactive Serial Execution**: Sends command, waits for device response lines, and prints them immediately!
+- JSON body: `{"command": "help", "timeout_ms": 2500, "expect": ">>>", "line_delay_ms": 30}`
 
-### 10. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
-**💻 Cross-Platform Local Shell Execution**: Runs system shell command (Windows PowerShell / Linux bash/sh) and returns stdout/stderr.
-- JSON body: `{"command": "idf.py build", "cwd": "/path", "timeout_sec": 60}`
-- Returns: `{"ok": true, "stdout": "...", "stderr": "...", "exit_code": 0, "duration_ms": 250, "platform": "linux"|"windows"}`
+### 8. `POST /api/shell` (or `./smp shell <command>` / `./smp sh <command>`)
+**💻 Cross-Platform Local Shell Execution**: Runs local shell command (Windows PowerShell / Linux bash/sh).
+- JSON body: `{"command": "idf.py build", "cwd": "/path"}`
 
-### 11. `POST /api/reset` (or `./smp reset`)
-Executes an explicit ESP32 Hardware Reset by pulsing the EN line (audited and recorded in stream).
+### 9. `POST /api/reset` (or `./smp reset`)
+Executes an ESP32 Hardware Reset by pulsing the EN line.
 
-### 12. `POST /api/boot` (or `./smp boot`)
+### 10. `POST /api/boot` (or `./smp boot`)
 Forces the ESP32 into ROM Bootloader / Download Mode (IO0 low + EN pulse).
 
-### 13. `POST /api/pin` (or `./smp pin [line_index|"last"] [note] [--preset 1-6]`)
+### 11. `POST /api/pin` (or `./smp pin [line_index|"last"] [note] [--preset 1-6]`)
 Tags and bookmarks a log line (or latest line if omitted or "last") with shape, color, emoji, and note.
 - Omit line number or use `last` to tag the latest received serial line instantly during testing!
 - Presets: 1: 😡 ekran hatası, 2: 🔊 cızırtı, 3: ⚠️ donanım uyarısı, 4: ✅ başarılı test, 5: ⚡ voltaj dalgalanması, 6: 🐛 bellek sızıntısı.
 
-### 14. `GET /api/pins` (or `./smp pins`)
+### 12. `GET /api/pins` (or `./smp pins`)
 Lists all bookmarked pins and notes across panels.
 
-### 15. `DELETE /api/pin` (or `./smp pin remove <id>`)
+### 13. `DELETE /api/pin` (or `./smp pin remove <id>`)
 Removes a pin by ID or line index.
 
-### 16. `POST /api/filter` (or `./smp filter add <tags...>`)
+### 14. `POST /api/filter` (or `./smp filter add <tags...>`)
 Adds or removes filter tags in the UI.
 - JSON body: `{"action": "add"|"remove"|"clear", "tags": ["HEAP", "Guru Meditation"]}`
 - Supports tag context windows: `tag+5`, `tag+-5`, `tag:ekran hatası+3`
 
-### 17. `POST /api/trigger` (or `./smp trigger add <tag>`)
+### 15. `POST /api/trigger` (or `./smp trigger add <tag>`)
 Sets an armed target trigger word.
 
-### 18. `GET /api/archives` (or `./smp archives`)
+### 16. `GET /api/archives` (or `./smp archives`)
 Lists all recorded session log archives on local disk.
 
-### 19. `GET /api/ai-logs` (or `./smp ai-logs`)
+### 17. `GET /api/ai-logs` (or `./smp ai-logs`)
 Returns the audit trail of all commands executed by AI models, visible live in the UI.
 
-### 20. `GET /api/ai-models` (or `./smp ai-models`)
-Cross-model peer directory: lists connected AI models, their active ports, sessions, and last activity (auto-pruned when ports disconnect).
-- Agents can supply headers `X-AI-Model: <name>` and `X-AI-Client: <id>` or query `?model=...`.
+### 18. `GET /api/ai-models` (or `./smp ai-models`)
+Cross-model peer visibility: lists connected AI models, their active ports, sessions, and last activity.
+- Agents can supply headers `X-AI-Model: <name>` and `X-AI-Client: <id>` or environment variable `AI_MODEL`.
 
 ---
 
 ## 💡 Quick Examples (cURL or CLI):
 ```bash
-# Auto-connect safely to ESP32 (DTR/RTS neutral, no reset)
+# Auto-connect to plugged ESP32
 smp connect auto
-# Non-destructive probe of port
-smp probe /dev/ttyUSB0
-# Interactive query: send command, stream output live, view stage status
+# Interactive query: send command and print device response immediately!
 smp exec "help"
-# Send multiline script with 30ms delay
+# Send multiline script with 30ms inter-line delay
 smp send -f script.py --delay 30
-# Run local shell tool
+# Run local shell tool (Windows/Linux)
 smp shell "esptool.py chip_id"
 # Read logs with tag context window (+- 5 lines)
 smp logs --filter "tag+5"
@@ -150,7 +136,7 @@ smp pin --preset 1
 AI_MODEL_ENV = os.environ.get("AI_MODEL", "AI-Agent")
 AI_CLIENT_ENV = os.environ.get("AI_CLIENT", "terminal-client")
 
-def request(path, method="GET", data=None, model_name=None, client_id=None):
+def request(path, method="GET", data=None, model_name=None, client_id=None, timeout=None):
     url = f"{API_BASE}{path}"
     req = urllib.request.Request(url, method=method)
     req.add_header("Content-Type", "application/json")
@@ -165,8 +151,11 @@ def request(path, method="GET", data=None, model_name=None, client_id=None):
     body = None
     if data is not None:
         body = json.dumps(data).encode("utf-8")
+
+    http_timeout = timeout if timeout is not None else 15.0
+
     try:
-        with urllib.request.urlopen(req, data=body, timeout=10) as resp:
+        with urllib.request.urlopen(req, data=body, timeout=http_timeout) as resp:
             content = resp.read().decode("utf-8")
             content_type = resp.headers.get("Content-Type", "")
             if "application/json" in content_type:
@@ -175,10 +164,25 @@ def request(path, method="GET", data=None, model_name=None, client_id=None):
                 except Exception:
                     return content
             return content
+    except urllib.error.HTTPError as e:
+        # Server is RUNNING and responded with 4xx or 5xx (e.g. 400 Bad Request)
+        try:
+            err_body = e.read().decode("utf-8")
+            if "application/json" in e.headers.get("Content-Type", ""):
+                try:
+                    return json.loads(err_body)
+                except Exception:
+                    pass
+            return {"ok": False, "status": e.code, "error": err_body or str(e)}
+        except Exception:
+            return {"ok": False, "status": e.code, "error": str(e)}
     except urllib.error.URLError as e:
+        if "timed out" in str(e).lower() or isinstance(e.reason, TimeoutError):
+            print(f"❌ [SMP CLI Zaman Aşımı] İstek zaman aşımına uğradı ({url}, {http_timeout}s): {e.reason}", file=sys.stderr)
+            return {"ok": False, "timeout": True, "error": f"HTTP Timeout: {e.reason}"}
         if path in ("/api/skill", "/skill", "/help"):
             return FALLBACK_SKILL_DOC
-        print(f"❌ [SMP CLI Error] Serial Monitor Pro açık değil ({url}): {e}", file=sys.stderr)
+        print(f"❌ [SMP CLI Hatası] Serial Monitor Pro servisine ulaşılamadı ({url}): {e.reason}", file=sys.stderr)
         print("Lütfen Serial Monitor Pro uygulamasını çalıştırın (`./run_v2.sh`).", file=sys.stderr)
         sys.exit(1)
 
@@ -253,7 +257,10 @@ def main():
                 if res.get("message"):
                     print(f"  {res.get('message')}")
             else:
-                print_result(res)
+                err_msg = res.get("error") if isinstance(res, dict) else str(res)
+                target = res.get("port", port) if isinstance(res, dict) else port
+                print(f"❌ [BAĞLANTI HATASI] '{target}' portuna bağlanılamadı:")
+                print(f"  • Hata: {err_msg}")
 
     elif cmd == "probe":
         port = "auto"
@@ -291,7 +298,10 @@ def main():
                     print(f"  • Örnek Çıktı  : {pr.get('response_sample')[:120]}")
                 print(f"  • Güvenli Mod  : 🛡️ Reset verilmedi (DTR/RTS nötr)")
             else:
-                print_result(res)
+                err_msg = res.get("error") if isinstance(res, dict) else str(res)
+                target = res.get("port", port) if isinstance(res, dict) else port
+                print(f"❌ [PORT SORGULAMA HATASI] '{target}' portu sorgulanamadı:")
+                print(f"  • Hata: {err_msg}")
 
     elif cmd == "disconnect":
         session_id = args[1] if len(args) > 1 else None
@@ -347,10 +357,9 @@ def main():
             data["session_id"] = session_id
         if delay_ms is not None:
             data["line_delay_ms"] = delay_ms
-        if raw_mode:
-            data["raw"] = True
-
-        print_result(request("/api/send", "POST", data))
+        lines_count = len(content.splitlines()) if content else 1
+        send_timeout = max(30.0, (lines_count * (delay_ms or 25) / 1000.0) + 30.0)
+        print_result(request("/api/send", "POST", data, timeout=send_timeout))
 
     elif cmd == "exec":
         if len(args) < 2:
@@ -413,8 +422,9 @@ def main():
 
         prev_handler = signal.signal(signal.SIGINT, sigint_handler)
 
+        http_timeout_sec = (timeout_ms / 1000.0) + 15.0
         try:
-            res = request("/api/exec", "POST", req_payload)
+            res = request("/api/exec", "POST", req_payload, timeout=http_timeout_sec)
         finally:
             signal.signal(signal.SIGINT, prev_handler)
 
