@@ -390,6 +390,32 @@ export function App() {
     await handleDeactivateAiPanel(panelId, 'Kullanıcı tarafından durduruldu');
   }, [handleDeactivateAiPanel]);
 
+  const handleOpenAiPanelFromHeader = useCallback(() => {
+    const existing = panelsRef.current.find((p) => p.isAiPanel);
+    if (!existing) {
+      const newAiPanel: PanelSession = {
+        ...createSession('', false, [
+          '======================================================================',
+          '🤖 AI SERIAL MONİTÖR (SMP REST & CLI)',
+          '📡 API Base URL: http://127.0.0.1:4567 | CLI: smp <komut>',
+          '💡 AI Ajanı komut gönderdiğinde tüm akış burada canlı olarak izlenir.',
+          '======================================================================'
+        ], '🤖 AI Monitör [Bağlantı Bekleniyor]', defaultAutoCloseSec),
+        id: `panel_ai_${Date.now()}`,
+        isAiPanel: true,
+        aiModelName: 'AI-Agent',
+        aiClientId: 'manual',
+        aiSessionStatus: 'passive',
+        aiActivePort: '',
+        isConnected: false,
+      };
+      setPanels((prev) => [...prev, newAiPanel]);
+      showToast(langRef.current === 'tr' ? '🤖 AI Serial Monitör Paneli ana ekrana eklendi!' : '🤖 AI Serial Monitor panel added to main screen!');
+    } else {
+      showToast(langRef.current === 'tr' ? `🤖 [${existing.aiModelName || 'AI'}] Paneli ana ekranda hazır.` : `🤖 AI panel is ready on screen.`);
+    }
+  }, [defaultAutoCloseSec, showToast]);
+
   // Language change
   const handleToggleLang = () => {
     const next: I18nLanguage = lang === 'tr' ? 'en' : 'tr';
@@ -473,7 +499,24 @@ export function App() {
           setGlobalHighlightWord('Telemetry');
         }
       } else {
-        setPanels([createSession(defaultPort, false, [], 'Panel 1')]);
+        const defaultAiPanel: PanelSession = {
+          ...createSession('', false, [
+            '======================================================================',
+            '🤖 AI SERIAL MONİTÖR (SMP REST & CLI)',
+            '📡 API Base URL: http://127.0.0.1:4567 | CLI: smp <komut>',
+            '💡 AI Ajanı komut gönderdiğinde veya bağlandığında tüm akış,',
+            '   cihaz logları ve doğrulama aşamaları bu panelde canlı izlenir.',
+            '======================================================================'
+          ], '🤖 AI Monitör [Bağlantı Bekleniyor]', defaultAutoCloseSec),
+          id: 'panel_ai_init',
+          isAiPanel: true,
+          aiModelName: 'AI-Agent',
+          aiClientId: 'init',
+          aiSessionStatus: 'passive',
+          aiActivePort: '',
+          isConnected: false,
+        };
+        setPanels([createSession(defaultPort, false, [], 'Panel 1'), defaultAiPanel]);
       }
     });
 
@@ -831,7 +874,34 @@ export function App() {
         }
 
         if (!targetAiPanel) {
-          // Brand new AI connection: spawn a new AI panel on main canvas!
+          // Check if there is an initial/waiting AI panel ready to be claimed
+          const waitingAiPanel = currentPanels.find(
+            (p) => p.isAiPanel && (p.id === 'panel_ai_init' || (p.aiSessionStatus === 'passive' && p.lines.length <= 10))
+          );
+
+          if (waitingAiPanel) {
+            targetAiPanel = waitingAiPanel;
+            setPanels((prev) =>
+              prev.map((p) => {
+                if (p.id !== waitingAiPanel.id) return p;
+                return {
+                  ...p,
+                  title: `🤖 ${payload.model_name || 'AI Ajanı'}`,
+                  aiModelName: payload.model_name || 'AI Ajanı',
+                  aiClientId: payload.client_id || 'anonymous',
+                  aiSessionStatus: 'active',
+                  aiActivePort: payload.port || p.aiActivePort || p.port,
+                  isConnected: true,
+                  lines: [...p.lines, formattedLine],
+                  rawLines: [...p.rawLines, formattedLine],
+                };
+              })
+            );
+            showToast(`🤖 [${payload.model_name || 'AI'}] AI Serial Monitör Paneli aktifleşti!`);
+            return;
+          }
+
+          // Otherwise brand new AI connection: spawn a new AI panel on main canvas!
           const newPanelId = `panel_ai_${payload.client_id || 'agent'}_${Date.now()}`;
           const initialGreeting = [
             `======================================================================`,
@@ -1344,15 +1414,19 @@ export function App() {
 
           {/* AI Model Terminal & Audit Console */}
           <button
-            onClick={() => setIsAiModalOpen(true)}
+            onClick={handleOpenAiPanelFromHeader}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setIsAiModalOpen(true);
+            }}
             title={
               lang === 'tr'
-                ? `🤖 AI Model Terminal & Denetim Konsolu (${aiLogs.length} işlem, ${connectedAiModels.length} bağlı model)\n• Tıkla: AI Ön Promptunu ve IP Adresini (http://127.0.0.1:4567) Kopyala`
-                : `🤖 AI Model Terminal & Audit Console (${aiLogs.length} logs, ${connectedAiModels.length} active agents)\n• Click: Copy AI Agent Prompt & IP Address (http://127.0.0.1:4567)`
+                ? `🤖 AI Serial Monitör Paneli (${connectedAiModels.length > 0 ? '🟢 AI Bağlı' : '⚪ AI Bekleniyor'})\n• Sol Tık: AI Monitör Panelini Ana Ekrana Getir / Odakla\n• Sağ Tık: Denetim & İstatistik Penceresini Aç`
+                : `🤖 AI Serial Monitor Panel (${connectedAiModels.length > 0 ? '🟢 AI Connected' : '⚪ Waiting'})\n• Left Click: Focus/Add AI Panel to Screen\n• Right Click: Open Audit Logs Modal`
             }
             className={`p-1.5 rounded-md border transition cursor-pointer shrink-0 flex items-center gap-1.5 ${
               connectedAiModels.length > 0
-                ? 'bg-indigo-950/70 text-indigo-300 border-indigo-500/60 hover:bg-indigo-900/80 shadow-sm shadow-indigo-500/30'
+                ? 'bg-purple-950/80 text-purple-200 border-purple-500/70 hover:bg-purple-900 shadow-md shadow-purple-500/30'
                 : aiLogs.length > 0
                 ? 'bg-purple-950/70 text-purple-300 border-purple-500/50 hover:bg-purple-900/80 shadow-sm shadow-purple-500/20'
                 : 'bg-[#1e2030] text-[#a6adc8] hover:text-purple-300 hover:bg-purple-950/30 border-[#313244]'
